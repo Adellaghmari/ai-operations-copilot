@@ -11,7 +11,7 @@ from app.config import Settings
 from app.models.entities import EvaluationResult, EvaluationRun
 from app.schemas.ai import ResolutionDraft, ReviewResult, TriageResult
 
-DATASET_VERSION = "golden-v1"
+DATASET_VERSION = "golden-v2"
 
 
 def golden_path() -> Path:
@@ -30,7 +30,9 @@ def load_golden_cases() -> list[dict]:
     return cases
 
 
-def score_case(case: dict, triage: TriageResult, retrieved_ids: list[str], resolution: ResolutionDraft) -> dict:
+def score_case(
+    case: dict, triage: TriageResult, retrieved_ids: list[str], resolution: ResolutionDraft
+) -> dict:
     expected = case["expected"]
     classification = triage.category == expected.get("category")
     severity_range = expected.get("severity_range", [triage.severity])

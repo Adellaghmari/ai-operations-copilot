@@ -1,5 +1,5 @@
-from app.services.evaluation import load_golden_cases, score_case
 from app.schemas.ai import ResolutionDraft, TriageResult
+from app.services.evaluation import load_golden_cases, score_case
 
 
 def test_golden_dataset_has_at_least_40_cases() -> None:

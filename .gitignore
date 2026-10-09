@@ -49,5 +49,18 @@ tmp/
 # OS
 desktop.ini
 
-# Cursor local
-.cursor/*.log
+# Cursor and local agent guidance. Not part of the public product tree.
+.cursor/
+AGENTS.md
+
+# Local verification notes. Product truth lives in README.md and docs/.
+CV_CLAIMS_MATRIX.md
+PROJECT_STATUS.md
+docs/INTERVIEW_ARCHITECTURE_NOTES.md
+
+# Local cloud credential helpers
+backend/scripts/azure_cloud_db_pass.py
+
+# Vercel
+.vercel/
+frontend/.vercel/

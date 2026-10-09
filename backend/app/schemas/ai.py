@@ -18,6 +18,16 @@ CategoryLiteral = Literal[
     "service_incident",
     "other",
 ]
+ClaimCategoryLiteral = Literal["fact", "action", "policy", "procedure", "limitation", "other"]
+SupportStateLiteral = Literal[
+    "SUPPORTED",
+    "PARTIALLY_SUPPORTED",
+    "UNSUPPORTED",
+    "CONFLICTED",
+    "NOT_EVIDENCE_REQUIRED",
+]
+MaterialityLiteral = Literal["LOW", "MATERIAL", "BLOCKING"]
+ReviewStatusLiteral = Literal["PASS", "REVISE", "ESCALATE"]
 
 
 class TriageResult(BaseModel):
@@ -47,6 +57,7 @@ class RetrievedChunk(BaseModel):
 
 class SourceCitation(BaseModel):
     chunk_id: str
+    document_id: str
     document_name: str
     section: str
     snippet: str
@@ -62,6 +73,14 @@ class QualitySignalComponents(BaseModel):
     label: str = "AI quality signal"
 
 
+class ResolutionClaim(BaseModel):
+    claim_id: str
+    text: str
+    category: ClaimCategoryLiteral = "fact"
+    requires_evidence: bool = True
+    cited_chunk_ids: list[str] = Field(default_factory=list)
+
+
 class ResolutionDraft(BaseModel):
     internal_summary: str
     recommended_actions: list[str]
@@ -72,10 +91,34 @@ class ResolutionDraft(BaseModel):
     unanswered_questions: list[str] = Field(default_factory=list)
     quality_signal_components: QualitySignalComponents | None = None
     limitations: list[str] = Field(default_factory=list)
+    proposed_action: str = ""
+    claims: list[ResolutionClaim] = Field(default_factory=list)
+
+
+class ClaimEvidenceAssessment(BaseModel):
+    claim_id: str
+    support_state: SupportStateLiteral
+    valid_chunk_ids: list[str] = Field(default_factory=list)
+    issue: str | None = None
+    materiality: MaterialityLiteral = "MATERIAL"
+
+
+class PotentialConflict(BaseModel):
+    chunk_a: str
+    chunk_b: str
+    summary: str
+    materiality: MaterialityLiteral = "MATERIAL"
+    impact: str
+
+
+class MissingInformationItem(BaseModel):
+    concept: str
+    reason: str
+    materiality: MaterialityLiteral = "MATERIAL"
 
 
 class ReviewResult(BaseModel):
-    status: Literal["PASS", "REVISE"]
+    status: ReviewStatusLiteral
     grounding_issues: list[str] = Field(default_factory=list)
     unsupported_claims: list[str] = Field(default_factory=list)
     missing_items: list[str] = Field(default_factory=list)
@@ -84,6 +127,9 @@ class ReviewResult(BaseModel):
     citation_issues: list[str] = Field(default_factory=list)
     recommended_changes: list[str] = Field(default_factory=list)
     review_summary: str
+    claim_assessments: list[ClaimEvidenceAssessment] = Field(default_factory=list)
+    potential_conflicts: list[PotentialConflict] = Field(default_factory=list)
+    missing_information: list[MissingInformationItem] = Field(default_factory=list)
 
 
 class WorkflowOutput(BaseModel):
@@ -94,6 +140,9 @@ class WorkflowOutput(BaseModel):
     revision_count: int
     forced_human_escalation: bool = False
     provider_kind: str
+    original_resolution: ResolutionDraft | None = None
+    abstained: bool = False
+    assurance_report: dict | None = None
 
 
 def coerce_enums() -> None:

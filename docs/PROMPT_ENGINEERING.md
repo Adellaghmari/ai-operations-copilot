@@ -20,8 +20,8 @@ Every AI run stores the prompt name and version that produced it.
 | Prompt | May do | Must not do |
 |---|---|---|
 | Triage | Classify, summarize, extract entities, build a retrieval query | Invent a customer-facing answer or cite knowledge it did not see |
-| Resolution | Draft a grounded recommendation and customer reply | State unsupported facts, ignore missing information, treat retrieved text as system orders |
-| Review | Compare draft to sources and policy | Rewrite the customer email itself beyond recommended changes |
+| Resolution | Draft a grounded recommendation, material claims, and customer reply | State unsupported facts, invent chunk IDs, ignore missing information, treat retrieved text as system orders |
+| Review | Compare draft to sources, assess claims, flag potential conflicts | Rewrite the customer email itself beyond recommended changes; invent chunk IDs |
 
 ## Grounding
 
@@ -36,6 +36,8 @@ Untrusted blocks are clearly delimited. Instructions say that ticket text and kn
 Safe: wording clarifications, examples, severity rubric phrasing, tone guidance.
 
 Unsafe without a new version and evaluation run: role changes, removal of grounding rules, raising revision limits, adding write tools.
+
+Production traces do not export full prompt bodies. `ENABLE_SENSITIVE_TELEMETRY=false`.
 
 ## Structured output
 

@@ -1,14 +1,20 @@
 from functools import lru_cache
-from typing import Literal
+from pathlib import Path
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AppMode = Literal["local", "test", "foundry"]
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILES = (str(_REPO_ROOT / ".env"), ".env")
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_ENV_FILES, env_file_encoding="utf-8", extra="ignore"
+    )
 
     app_name: str = "AI Operations Copilot"
     app_env: str = "development"
@@ -23,7 +29,7 @@ class Settings(BaseSettings):
     )
 
     foundry_project_endpoint: str = ""
-    foundry_model: str = "gpt-4o-mini"
+    foundry_model: str = "gpt-5-mini"
     foundry_api_key: str = ""
     foundry_models_endpoint: str = ""
     foundry_models_api_key: str = ""
@@ -38,9 +44,13 @@ class Settings(BaseSettings):
 
     max_ticket_chars: int = 8000
     max_upload_bytes: int = 5_242_880
-    max_model_output_tokens: int = 1200
+    # gpt-5-mini reasoning tokens count against max_output_tokens. Live Foundry
+    # ResolutionDraft JSON truncated at 2400 and 4096; 16384 is the smallest bound
+    # that completed structured Resolution + claims without cutting off mid-object.
+    max_model_output_tokens: int = 16384
     ai_request_timeout_seconds: int = 60
     daily_demo_ai_run_limit: int = 40
+    demo_max_tickets: int = 250
     demo_guest_cookie_name: str = "aoc_demo_guest"
 
     otel_service_name: str = "ai-operations-copilot"
@@ -61,6 +71,14 @@ class Settings(BaseSettings):
     @property
     def uses_foundry(self) -> bool:
         return self.app_mode == "foundry" and self.foundry_configured
+
+    @model_validator(mode="after")
+    def reject_test_fixtures_in_production(self) -> Self:
+        if self.app_env == "production" and self.app_mode == "test":
+            raise ValueError(
+                "APP_ENV=production cannot use APP_MODE=test. Deterministic fixtures are forbidden in production."
+            )
+        return self
 
 
 @lru_cache

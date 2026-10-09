@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "audit:copy": "node scripts/copy-audit.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",

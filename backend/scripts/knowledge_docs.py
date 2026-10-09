@@ -126,6 +126,43 @@ Exports exclude private internal notes. Files expire after 24 hours.
 """,
     },
     {
+        "slug": "enterprise-refund-policy",
+        "title": "Enterprise refund policy",
+        "filename": "enterprise-refund-policy.md",
+        "visibility": "standard",
+        "text": """# Enterprise refund policy
+
+## Finance approval
+Enterprise refunds require written finance approval. Support must not issue or promise an immediate refund to the card on file.
+
+## Unused prepaid months
+Unused prepaid months are not automatically refundable on Enterprise. A finance reviewer decides after confirming contract tier, invoice age, and remaining term.
+
+## What support may say
+Acknowledge the request, collect the workspace name and invoice period, and state that finance must review Enterprise refunds. Do not quote a refund amount or timeline.
+""",
+    },
+    {
+        "slug": "domain-ownership-security",
+        "title": "Domain ownership and access changes",
+        "filename": "domain-ownership-security.md",
+        "visibility": "standard",
+        "text": """# Domain ownership and access changes
+
+## Identity verification
+Identity verification is required before changing a production domain, transferring workspace ownership, or altering SSO.
+
+## MFA and SSO
+Support must not disable MFA, skip SSO, or bypass identity provider controls. There is no temporary MFA exception for migrations.
+
+## Domain changes
+Domain ownership is proven through a DNS TXT record and a verified admin on the current domain. Support must not point production traffic to a personal domain.
+
+## Account ownership
+Ownership transfers require the current verified owner, the target admin email, and security specialist approval.
+""",
+    },
+    {
         "slug": "service-status",
         "title": "Service incident communications",
         "filename": "service-status.md",

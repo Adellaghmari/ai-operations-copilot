@@ -3,9 +3,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.api.deps import db_session, settings_dep
+from app.api.deps import db_session, require_private_demo, settings_dep
 from app.config import Settings
 from app.models.entities import EvaluationResult, EvaluationRun
 from app.schemas.api import EvaluationCaseOut, EvaluationRunOut
@@ -50,6 +49,7 @@ async def run_results(run_id: UUID, session: AsyncSession = Depends(db_session))
 
 @router.post("/run", response_model=EvaluationRunOut)
 async def run_eval(
+    _: None = Depends(require_private_demo),
     session: AsyncSession = Depends(db_session),
     settings: Settings = Depends(settings_dep),
 ) -> EvaluationRunOut:

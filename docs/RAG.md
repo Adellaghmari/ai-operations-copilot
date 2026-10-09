@@ -25,9 +25,11 @@ Why this size: support knowledge needs enough surrounding procedure to be useful
 
 ## Embeddings
 
-In `APP_MODE=foundry`, embeddings are produced by `FoundryEmbeddingClient` against `FOUNDRY_MODELS_ENDPOINT`.
+In `APP_MODE=foundry`, embeddings are produced by `FoundryEmbeddingProvider` against `FOUNDRY_MODELS_ENDPOINT`.
 
-The Foundry **project** endpoint is not used for embeddings. Current Microsoft documentation states that project endpoints do not route embedding traffic.
+That setting must be the Azure OpenAI v1 endpoint, not the Foundry project endpoint. The installed `FoundryEmbeddingClient` requires an API key (`AzureKeyCredential`), so this project uses Microsoft Entra (`DefaultAzureCredential` + `get_bearer_token_provider`) and `OpenAI.embeddings.create` instead.
+
+Current Microsoft documentation states that project endpoints do not route embedding traffic.
 
 Each chunk stores:
 
@@ -52,11 +54,23 @@ They are fused with Reciprocal Rank Fusion:
 RRF(d) = Σ 1 / (k + rank_i(d))
 ```
 
-Default `k = 60`. Configurable `top_k` (default 6) and minimum score. Chunks below the threshold are dropped so the Resolution Agent does not receive clearly irrelevant context.
+Default `k = 60`. Configurable `top_k` (default 6) and minimum score.
+
+**Score semantics (important):**
+
+| Use | Score |
+|---|---|
+| Candidate relevance | Pre-fusion vector cosine (`1 - distance`) or lexical `ts_rank` |
+| RRF | Ordering only: `1/(k + rank)` summed across lists |
+| Assurance / retrieval threshold | Pre-fusion `retrieval_score` compared to `retrieval_min_score` (default `0.22`) |
+
+RRF must **not** overwrite the underlying relevance score. An earlier bug did that and caused every live case to abstain; it is fixed. Lexical-only candidates can pass fusion with a lexical `ts_rank` that is not a cosine similarity; the threshold still uses that stored pre-fusion score.
+
+Azure Database for PostgreSQL Flexible Server (PostgreSQL 16, Sweden Central) is used by the public Container App: `vector` extension 0.8.2, `vector(1536)` cosine search, English FTS with GIN, and RRF fusion with `k=60` / `top_k=6`. Azure requires `vector` on `azure.extensions` before `CREATE EXTENSION vector`. Retrieval counts appear on OpenTelemetry spans; chunk bodies do not.
 
 ## Citations
 
-Every resolution that uses retrieved text must cite chunk IDs. The UI opens the source document, section, and snippet. Citations that do not map to stored chunks are treated as a review failure.
+Every resolution that uses retrieved text is rebound server-side to stored chunks. The persisted citation always includes `document_id`, `document_name`, `chunk_id`, `section`, and the exact stored snippet. Material claims may only cite retrieved chunk IDs; invented IDs are dropped before the Evidence Ledger is written. The UI opens that snippet from application data. Citations that do not map to retrieved chunks are dropped.
 
 ## Limitations
 

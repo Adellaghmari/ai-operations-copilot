@@ -23,6 +23,18 @@ Language models can invent plausible details. Mitigations:
 
 Residual risk remains. The UI must not call model text a guaranteed fact.
 
+## Decision Assurance and abstention
+
+The Decision Assurance Engine measures inspectable evidence and process conditions: claim support, coverage counts, missing information, potential conflicts, unsupported actions, independent review, and mandatory human control.
+
+These gates are not a scientific confidence score and do not prove objective truth. Passing gates does not guarantee correctness.
+
+AI abstention is intentional. When supporting evidence is insufficient, required facts are missing, a blocking potential conflict exists, or the proposed action is unsupported, the system withholds a customer response. Abstention is a successful safe outcome, not an error.
+
+Potential conflicts are labeled as potential conflicts. They are not claimed as mathematical proofs.
+
+Human review remains required before any customer facing decision.
+
 ## Prompt injection
 
 Ticket text, uploaded files, and retrieved chunks are untrusted. Prompts separate instructions from untrusted content. The Review Agent looks for suspicious instruction-following. Dedicated evaluation cases cover direct and indirect injection.
@@ -31,7 +43,9 @@ These defenses reduce risk. They do not make injection impossible.
 
 ## Data privacy
 
-Demo customers and tickets are fictional. No real customer PII belongs in this repository or the public demo. Secrets stay in environment variables.
+Demo customers and tickets are fictional. No real customer PII belongs in this repository or the public demo. Secrets stay in environment variables and Container Apps secret references.
+
+Production telemetry sets `ENABLE_SENSITIVE_TELEMETRY=false`. Traces may include run IDs, agent names, model deployment names, retrieval counts, and HTTP routes. They must not include ticket bodies, prompts, chunk text, customer drafts, or credentials.
 
 ## Sensitive information
 

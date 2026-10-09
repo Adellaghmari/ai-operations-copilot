@@ -6,6 +6,9 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.ai.assurance.engine import DecisionAssuranceEngine
+from app.ai.citations import bind_citations_to_retrieved
+from app.ai.observability import get_tracer, set_safe_span_attributes
 from app.ai.prompts.registry import prompt_body, prompt_versions_metadata
 from app.ai.providers.factory import get_chat_provider
 from app.ai.providers.foundry import FoundryUnavailableError
@@ -34,52 +37,116 @@ class SupportWorkflowRunner:
             embedding_model=self.settings.foundry_embedding_model
             if self.settings.app_mode == "foundry"
             else "deterministic-hash",
-            agent_versions={"triage": "1", "resolution": "1", "review": "1", "retrieval": "1"},
+            agent_versions={
+                "triage": "1",
+                "resolution": "2",
+                "review": "2",
+                "retrieval": "1",
+                "assurance": "1",
+            },
             prompt_versions=prompt_versions_metadata(),
         )
         self.session.add(run)
         await self.session.flush()
 
-        try:
-            output = await self._execute(ticket, run, guest_feedback)
-        except FoundryUnavailableError as exc:
-            run.status = AiRunStatus.FOUNDRY_UNAVAILABLE.value
-            run.error_message = str(exc)
-            await self.session.commit()
-            return run
-        except Exception as exc:  # noqa: BLE001
-            run.status = AiRunStatus.FAILED.value
-            run.error_message = str(exc)
-            await self.session.commit()
-            raise
+        tracer = get_tracer()
+        with tracer.start_as_current_span("ai.workflow") as span:
+            set_safe_span_attributes(
+                span,
+                **{
+                    "ai.run_id": str(run.id),
+                    "ai.ticket_id": str(ticket.id),
+                    "ai.provider_kind": run.provider_kind,
+                    "ai.model_deployment": run.model_deployment,
+                    "ai.embedding_model": run.embedding_model,
+                    "app.environment": self.settings.app_env,
+                    "app.mode": self.settings.app_mode,
+                    "service.name": self.settings.otel_service_name,
+                },
+            )
+            try:
+                output = await self._execute(ticket, run, guest_feedback)
+            except FoundryUnavailableError as exc:
+                span.set_attribute("ai.success", False)
+                span.set_attribute("ai.human_review_state", AiRunStatus.FOUNDRY_UNAVAILABLE.value)
+                run.status = AiRunStatus.FOUNDRY_UNAVAILABLE.value
+                run.error_message = str(exc)
+                await self.session.commit()
+                return run
+            except Exception as exc:  # noqa: BLE001
+                span.set_attribute("ai.success", False)
+                run.status = AiRunStatus.FAILED.value
+                run.error_message = str(exc)
+                await self.session.commit()
+                raise
 
-        run.triage_result = output.triage.model_dump()
-        run.retrieval_result = {"chunks": [item.model_dump() for item in output.retrieved]}
-        run.resolution_draft = output.resolution.model_dump()
-        run.review_result = output.review.model_dump()
-        run.original_customer_response = output.resolution.customer_response_draft
-        run.revision_count = output.revision_count
-        run.retrieved_chunk_count = len(output.retrieved)
-        run.quality_signal = output.resolution.quality_signal_components.model_dump()
-        run.status = (
-            AiRunStatus.AWAITING_HUMAN.value
-            if not output.forced_human_escalation
-            else AiRunStatus.AWAITING_HUMAN.value
-        )
-        if output.forced_human_escalation:
-            run.error_message = "Review failed after one revision. Human escalation is required."
-        run.duration_ms = int((perf_counter() - started) * 1000)
-        ticket.last_ai_analysis_at = datetime.now(UTC)
-        ticket.category = output.triage.category
-        ticket.severity = output.triage.severity
-        ticket.ai_review_status = run.status
-        if output.forced_human_escalation:
-            ticket.status = "escalated"
-        else:
-            ticket.status = "waiting_on_human"
-        await self.session.commit()
-        await self.session.refresh(run, attribute_names=["steps"])
-        return run
+            run.triage_result = output.triage.model_dump()
+            run.retrieval_result = {"chunks": [item.model_dump() for item in output.retrieved]}
+            run.resolution_draft = output.resolution.model_dump()
+            run.review_result = output.review.model_dump()
+            if output.original_resolution is not None:
+                run.original_resolution_draft = output.original_resolution.model_dump()
+            run.assurance_report = output.assurance_report
+            run.assurance_outcome = (output.assurance_report or {}).get("outcome")
+            run.abstained = output.abstained
+            ledger = (output.assurance_report or {}).get("ledger") or []
+            run.supported_claim_count = sum(
+                1 for item in ledger if item.get("support_state") == "SUPPORTED"
+            )
+            run.unsupported_claim_count = sum(
+                1 for item in ledger if item.get("support_state") == "UNSUPPORTED"
+            )
+            run.conflict_count = len((output.assurance_report or {}).get("conflicts") or [])
+            run.missing_information_count = len((output.assurance_report or {}).get("gaps") or [])
+            run.original_customer_response = (
+                None if output.abstained else output.resolution.customer_response_draft
+            )
+            run.revision_count = output.revision_count
+            run.retrieved_chunk_count = len(output.retrieved)
+            run.quality_signal = output.resolution.quality_signal_components.model_dump()
+            run.status = AiRunStatus.AWAITING_HUMAN.value
+            if output.forced_human_escalation:
+                run.error_message = (
+                    "Review failed after one revision. Human escalation is required."
+                )
+            if output.abstained:
+                run.error_message = None
+            run.duration_ms = int((perf_counter() - started) * 1000)
+            ticket.last_ai_analysis_at = datetime.now(UTC)
+            ticket.category = output.triage.category
+            ticket.severity = output.triage.severity
+            ticket.ai_review_status = run.status
+            if output.forced_human_escalation and not output.abstained:
+                ticket.status = "escalated"
+            else:
+                ticket.status = "waiting_on_human"
+            set_safe_span_attributes(
+                span,
+                **{
+                    "ai.success": True,
+                    "ai.retrieved_chunk_count": run.retrieved_chunk_count,
+                    "ai.revision_count": run.revision_count,
+                    "ai.human_review_state": run.status,
+                    "ai.forced_human_escalation": output.forced_human_escalation,
+                    "ai.duration_ms": run.duration_ms,
+                    "ai.assurance.outcome": run.assurance_outcome,
+                    "ai.assurance.abstained": run.abstained,
+                    "ai.assurance.conflict_count": run.conflict_count,
+                    "ai.assurance.missing_information_count": run.missing_information_count,
+                },
+            )
+            with tracer.start_as_current_span("ai.human_review.transition") as hitl:
+                set_safe_span_attributes(
+                    hitl,
+                    **{
+                        "ai.run_id": str(run.id),
+                        "ai.human_review_state": run.status,
+                        "ai.revision_count": run.revision_count,
+                    },
+                )
+            await self.session.commit()
+            await self.session.refresh(run, attribute_names=["steps"])
+            return run
 
     async def _execute(
         self, ticket: Ticket, run: AiRun, guest_feedback: str | None
@@ -117,7 +184,9 @@ class SupportWorkflowRunner:
                 schema=ResolutionDraft,
             ),
         )
+        resolution = bind_citations_to_retrieved(resolution, retrieved)
         run.status = AiRunStatus.RESOLUTION_GENERATED.value
+        original_resolution = resolution
 
         review = await self._step(
             run,
@@ -137,12 +206,11 @@ class SupportWorkflowRunner:
                 "resolution_revision",
                 lambda: self.chat.complete_structured(
                     instructions=prompt_body("resolution"),
-                    user_input=_resolution_input(
-                        ticket_payload, triage, retrieved, review
-                    ),
+                    user_input=_resolution_input(ticket_payload, triage, retrieved, review),
                     schema=ResolutionDraft,
                 ),
             )
+            resolution = bind_citations_to_retrieved(resolution, retrieved)
             review = await self._step(
                 run,
                 "review_revision",
@@ -164,6 +232,24 @@ class SupportWorkflowRunner:
             triage.missing_information,
             self.settings.retrieval_min_score,
         )
+        engine = DecisionAssuranceEngine()
+        report, resolution = engine.evaluate(
+            ticket_subject=ticket.subject,
+            ticket_body=ticket.body,
+            triage=triage,
+            retrieved=retrieved,
+            resolution=resolution,
+            review=review,
+            original_resolution=original_resolution if revision_count else None,
+            revision_count=revision_count,
+            forced_human_escalation=forced,
+            min_retrieval_score=self.settings.retrieval_min_score,
+            prompt_versions=prompt_versions_metadata(),
+            provider_kind=getattr(self.chat, "kind", "unknown"),
+            model_deployment=getattr(self.chat, "model_name", None),
+            embedding_model=run.embedding_model,
+            run_id=str(run.id),
+        )
         return WorkflowOutput(
             triage=triage,
             retrieved=retrieved,
@@ -172,6 +258,9 @@ class SupportWorkflowRunner:
             revision_count=revision_count,
             forced_human_escalation=forced,
             provider_kind=getattr(self.chat, "kind", "unknown"),
+            original_resolution=original_resolution if revision_count else None,
+            abstained=report.abstention.abstained,
+            assurance_report=report.model_dump(),
         )
 
     async def _step(self, run: AiRun, name: str, factory):
@@ -185,23 +274,46 @@ class SupportWorkflowRunner:
         )
         self.session.add(step)
         await self.session.flush()
-        try:
-            result = await factory()
-        except Exception:
-            step.status = "failed"
+        span_names = {
+            "triage": "ai.agent.triage",
+            "retrieval": "ai.retrieval",
+            "resolution": "ai.agent.resolution",
+            "review": "ai.agent.review",
+            "resolution_revision": "ai.agent.resolution_revision",
+            "review_revision": "ai.agent.review_revision",
+        }
+        tracer = get_tracer()
+        with tracer.start_as_current_span(span_names.get(name, f"ai.step.{name}")) as span:
+            set_safe_span_attributes(
+                span,
+                **{
+                    "ai.run_id": str(run.id),
+                    "ai.agent_name": name,
+                    "ai.provider_kind": run.provider_kind,
+                    "ai.model_deployment": run.model_deployment,
+                },
+            )
+            try:
+                result = await factory()
+            except Exception:
+                span.set_attribute("ai.success", False)
+                step.status = "failed"
+                step.ended_at = datetime.now(UTC)
+                step.duration_ms = int((perf_counter() - started) * 1000)
+                await self.session.flush()
+                raise
+            step.status = "completed"
             step.ended_at = datetime.now(UTC)
             step.duration_ms = int((perf_counter() - started) * 1000)
+            if hasattr(result, "model_dump"):
+                step.payload = result.model_dump()
+            elif isinstance(result, list):
+                step.payload = {"count": len(result)}
+                span.set_attribute("ai.retrieved_chunk_count", len(result))
+            span.set_attribute("ai.success", True)
+            span.set_attribute("ai.duration_ms", step.duration_ms or 0)
             await self.session.flush()
-            raise
-        step.status = "completed"
-        step.ended_at = datetime.now(UTC)
-        step.duration_ms = int((perf_counter() - started) * 1000)
-        if hasattr(result, "model_dump"):
-            step.payload = result.model_dump()
-        elif isinstance(result, list):
-            step.payload = {"count": len(result)}
-        await self.session.flush()
-        return result
+            return result
 
 
 def _ticket_payload(ticket: Ticket, feedback: str | None) -> str:
@@ -218,10 +330,15 @@ def _resolution_input(ticket_payload: str, triage: TriageResult, retrieved, revi
     chunks = []
     for item in retrieved:
         chunks.append(
-            f"chunk_id={item.chunk_id} document={item.document_name} section={item.section} "
+            f"chunk_id={item.chunk_id} document_id={item.document_id} "
+            f"document={item.document_name} section={item.section} "
             f"score={item.retrieval_score}\n{item.body}"
         )
-    marker = "retrieved_count=0\nNO_RELEVANT_KNOWLEDGE" if not retrieved else f"retrieved_count={len(retrieved)}"
+    marker = (
+        "retrieved_count=0\nNO_RELEVANT_KNOWLEDGE"
+        if not retrieved
+        else f"retrieved_count={len(retrieved)}"
+    )
     review_block = ""
     if review is not None:
         review_block = "\nReviewer feedback:\n" + json.dumps(review.model_dump())

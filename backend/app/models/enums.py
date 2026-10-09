@@ -100,4 +100,5 @@ class FeedbackLabel(StrEnum):
 class ProviderKind(StrEnum):
     FOUNDRY = "foundry"
     TEST_FIXTURE = "test_fixture"
+    LOCAL_HASH = "local_hash"
     UNAVAILABLE = "unavailable"
