@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AiRun, AssuranceReport, EvidenceLedgerEntry, RetrievedChunk } from "../../lib/api";
 import { materialityTone, supportTone } from "../../lib/presentation";
 import { humanize } from "../../lib/utils";
+import { Link } from "react-router-dom";
 import { Badge, Button, Card, TechnicalId } from "../../components/ui";
 import { Disclosure } from "../../components/Disclosure";
 
@@ -86,9 +87,10 @@ function LedgerRow({
   entry: EvidenceLedgerEntry;
   onSelect: (chunk: RetrievedChunk) => void;
 }) {
+  const [open, setOpen] = useState(false);
   return (
     <li
-      className="rounded-lg border border-line bg-surface p-3 text-sm"
+      className="rounded-xl border border-line bg-surface p-3 text-sm"
       data-testid={`ledger-${entry.claim_id}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -131,6 +133,35 @@ function LedgerRow({
         </p>
       )}
       {entry.review_note ? <p className="mt-2 text-xs text-muted">Review note: {entry.review_note}</p> : null}
+      <div className="mt-3">
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? "Hide provenance" : "Inspect provenance"}
+        </Button>
+        {open ? (
+          <div className="mt-2 space-y-2 rounded-lg border border-line bg-surface-2 p-3" data-testid={`ledger-provenance-${entry.claim_id}`}>
+            <p className="text-xs text-muted">
+              Support {humanize(entry.support_state).toLowerCase()}. Evidence required:{" "}
+              {entry.requires_evidence ? "yes" : "no"}.
+            </p>
+            {entry.document_ids.length ? (
+              entry.document_ids.map((id) => <TechnicalId key={id} label="document_id" value={id} />)
+            ) : (
+              <p className="text-xs text-muted">No document_id is bound to this claim.</p>
+            )}
+            {entry.chunk_ids.length
+              ? entry.chunk_ids.map((id) => <TechnicalId key={id} label="chunk_id" value={id} />)
+              : null}
+            <Link className="inline-block text-xs underline underline-offset-2 hover:text-lime" to="/knowledge">
+              Open the knowledge base
+            </Link>
+          </div>
+        ) : null}
+      </div>
     </li>
   );
 }

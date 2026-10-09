@@ -20,6 +20,13 @@ def test_demo_reset_uses_postgres_advisory_lock() -> None:
     assert "asyncio.Lock" not in inspect.getsource(seed)
 
 
+def test_synthetic_tickets_use_relative_demo_clock() -> None:
+    source = inspect.getsource(seed._seed_database)
+    assert "datetime.now(UTC)" in source
+    assert 'timedelta(days=item["days_ago"]' in source
+    assert "live AI runs" in source
+
+
 def test_demo_reset_lock_survives_orm_commits() -> None:
     acquire = inspect.getsource(seed._acquire_demo_reset_lock)
     seed_source = inspect.getsource(seed.seed_database)

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { KnowledgeDocument } from "../lib/api";
@@ -107,13 +108,28 @@ function DocumentDetails({ document: doc }: { document: KnowledgeDocument }) {
 
 export function KnowledgePage() {
   const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const docs = useQuery({ queryKey: ["knowledge"], queryFn: api.knowledge });
   const [searchText, setSearchText] = useState("");
   const [debounced, setDebounced] = useState("");
-  const [detailsId, setDetailsId] = useState<string | null>(null);
+  const [detailsId, setDetailsId] = useState<string | null>(params.get("document"));
   const [pendingDelete, setPendingDelete] = useState<KnowledgeDocument | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  function openDocument(id: string) {
+    setDetailsId(id);
+    const next = new URLSearchParams(params);
+    next.set("document", id);
+    setParams(next, { replace: true });
+  }
+
+  function closeDocument() {
+    setDetailsId(null);
+    const next = new URLSearchParams(params);
+    next.delete("document");
+    setParams(next, { replace: true });
+  }
 
   useEffect(() => {
     const handle = window.setTimeout(() => setDebounced(searchText.trim()), 300);
@@ -137,7 +153,7 @@ export function KnowledgePage() {
     mutationFn: (id: string) => api.deleteDocument(id),
     onSuccess: async (_result, id) => {
       setPendingDelete(null);
-      if (detailsId === id) setDetailsId(null);
+      if (detailsId === id) closeDocument();
       await queryClient.invalidateQueries({ queryKey: ["knowledge"] });
     },
   });
@@ -265,6 +281,9 @@ export function KnowledgePage() {
                       {item.vector_rank ? `, vector rank ${item.vector_rank}` : ""}
                       {item.lexical_rank ? `, text rank ${item.lexical_rank}` : ""}
                     </p>
+                    <Button variant="ghost" size="sm" className="mt-2" onClick={() => openDocument(item.document_id)}>
+                      Open source document
+                    </Button>
                   </li>
                 ))}
               </ul>
@@ -320,7 +339,7 @@ export function KnowledgePage() {
                       <span>Last indexed {formatDate(doc.last_indexed_at)}</span>
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <Button variant="secondary" size="sm" onClick={() => setDetailsId(doc.id)}>
+                      <Button variant="secondary" size="sm" onClick={() => openDocument(doc.id)}>
                         View details and chunks
                       </Button>
                       {administrativeMutationsEnabled ? (
@@ -346,7 +365,7 @@ export function KnowledgePage() {
 
       <Dialog
         open={detailsDoc !== null}
-        onClose={() => setDetailsId(null)}
+        onClose={closeDocument}
         title={detailsDoc?.title ?? "Document"}
         description="Document metadata and the chunks retrieval can cite."
         variant="drawer"

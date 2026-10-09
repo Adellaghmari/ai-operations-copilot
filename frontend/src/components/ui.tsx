@@ -51,11 +51,37 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        "rounded-xl border border-line bg-surface p-5 shadow-[0_18px_50px_-28px_rgba(0,0,0,0.85)]",
+        "rounded-2xl border border-line bg-surface/90 p-5 shadow-[0_22px_60px_-32px_rgba(0,0,0,0.9)]",
         className,
       )}
       {...props}
     />
+  );
+}
+
+/** Compact filter or status chip. Active uses lime because that marks human selection. */
+export function Chip({
+  active,
+  children,
+  className,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "inline-flex min-h-8 items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
+        FOCUS_RING,
+        active
+          ? "bg-lime text-lime-ink"
+          : "border border-line-strong bg-surface-2 text-ink-soft hover:border-violet/50 hover:text-ink",
+        className,
+      )}
+      aria-pressed={active}
+      {...props}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -94,7 +120,7 @@ export function Badge({
 }
 
 const CONTROL =
-  "w-full rounded-md border border-line-strong bg-canvas px-3 py-2 text-sm text-ink outline-none placeholder:text-faint focus-visible:border-lime focus-visible:ring-2 focus-visible:ring-lime/30 disabled:bg-surface-3 disabled:text-faint aria-[invalid=true]:border-red-400";
+  "w-full rounded-lg border border-line-strong bg-canvas/80 px-3 py-2.5 text-sm text-ink outline-none placeholder:text-faint focus-visible:border-lime focus-visible:ring-2 focus-visible:ring-lime/30 disabled:bg-surface-3 disabled:text-faint aria-[invalid=true]:border-red-400";
 
 export type ControlProps = { id: string; "aria-describedby"?: string; "aria-invalid"?: boolean };
 
@@ -171,23 +197,43 @@ export function PageHeader({
   description,
   actions,
   titleTestId,
+  display = false,
+  className,
+  /** Lets a long display title use the row beside its actions. Other pages keep the narrower column. */
+  roomy = false,
 }: {
   eyebrow?: string;
   title: string;
   description?: ReactNode;
   actions?: ReactNode;
   titleTestId?: string;
+  display?: boolean;
+  className?: string;
+  roomy?: boolean;
 }) {
   return (
-    <header className="flex flex-wrap items-start justify-between gap-4">
-      <div className="min-w-0 max-w-3xl">
+    <header
+      className={cn(
+        "flex flex-wrap items-start justify-between gap-4",
+        roomy && "lg:flex-nowrap lg:items-start lg:gap-x-6",
+        className,
+      )}
+    >
+      <div className={cn("min-w-0", roomy ? "lg:flex-1" : "max-w-3xl")}>
         {eyebrow ? (
-          <p className="text-xs font-medium uppercase tracking-[0.2em] text-lime">{eyebrow}</p>
+          <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-violet">{eyebrow}</p>
         ) : null}
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-ink" data-testid={titleTestId}>
+        <h1
+          className={cn(
+            "mt-2 font-semibold text-ink",
+            display ? "display-title text-4xl sm:text-5xl" : "text-3xl tracking-tight",
+            roomy && "lg:text-[2.9rem] lg:leading-[1.08]",
+          )}
+          data-testid={titleTestId}
+        >
           {title}
         </h1>
-        {description ? <div className="mt-2 text-sm leading-6 text-muted">{description}</div> : null}
+        {description ? <div className="mt-3 max-w-2xl text-sm leading-7 text-muted">{description}</div> : null}
       </div>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
     </header>
@@ -326,6 +372,15 @@ export function TechnicalId({ label, value }: { label: string; value: string }) 
 }
 
 /** Small uppercase label used above values and sections. */
-export function Eyebrow({ children }: { children: ReactNode }) {
-  return <p className="text-xs font-medium uppercase tracking-[0.16em] text-lime">{children}</p>;
+export function Eyebrow({ children, tone = "violet" }: { children: ReactNode; tone?: "violet" | "lime" }) {
+  return (
+    <p
+      className={cn(
+        "text-[11px] font-medium uppercase tracking-[0.18em]",
+        tone === "lime" ? "text-lime" : "text-violet",
+      )}
+    >
+      {children}
+    </p>
+  );
 }

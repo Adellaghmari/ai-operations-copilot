@@ -27,7 +27,7 @@ function FeedbackBody({ data }: { data: FeedbackSummary }) {
   const nothingRecorded =
     data.total === 0 && data.approval_rate === null && data.edit_rate === null && data.rejection_rate === null;
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       {nothingRecorded ? (
         <EmptyState
           title="No human decisions or labels are recorded yet"
@@ -108,6 +108,20 @@ function FeedbackBody({ data }: { data: FeedbackSummary }) {
         <p className="mt-4 text-xs text-muted">
           The API reports aggregates only. Individual feedback entries are not available on this page.
         </p>
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+          <Link className="underline underline-offset-2 hover:text-lime" to="/tickets?ai_review_status=awaiting_human">
+            Tickets awaiting a human
+          </Link>
+          <Link className="underline underline-offset-2 hover:text-lime" to="/tickets?ai_review_status=human_approved">
+            Approved tickets
+          </Link>
+          <Link className="underline underline-offset-2 hover:text-lime" to="/tickets?ai_review_status=human_edited">
+            Edited approvals
+          </Link>
+          <Link className="underline underline-offset-2 hover:text-lime" to="/tickets?ai_review_status=human_rejected">
+            Rejected tickets
+          </Link>
+        </div>
       </Card>
     </div>
   );
@@ -118,7 +132,7 @@ export function FeedbackPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Knowledge and AI"
+        eyebrow="Knowledge and quality"
         title="Feedback analytics"
         titleTestId="feedback-heading"
         description="What humans decided about AI recommendations. These are recorded decisions, not model confidence."

@@ -20,6 +20,17 @@ function prefersReducedMotion(): boolean {
     : false;
 }
 
+/** Scroll and focus a ticket section or a named control. Used by section nav and guided review. */
+export function focusTicketTarget(id: string): HTMLElement | null {
+  const element = typeof document !== "undefined" ? document.getElementById(id) : null;
+  if (!element) return null;
+  if (typeof element.scrollIntoView === "function") {
+    element.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
+  }
+  if (typeof element.focus === "function") element.focus({ preventScroll: true });
+  return element;
+}
+
 /**
  * Sticky in page navigation. Sections stay in one scrolling page, so every section is reachable
  * with a link, a keyboard, and a screen reader. On narrow screens the bar scrolls sideways.
@@ -60,19 +71,15 @@ export function SectionNav({ sections }: { sections: SectionLink[] }) {
   }, [sections]);
 
   function go(id: string) {
-    const element = document.getElementById(id);
-    if (!element) return;
     lockedUntil.current = Date.now() + 900;
-    element.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
-    setActive(id);
-    // Move focus to the section so keyboard and screen reader users land where they navigated.
-    element.focus({ preventScroll: true });
+    const element = focusTicketTarget(id);
+    if (element) setActive(id);
   }
 
   return (
     <nav
       aria-label="Ticket sections"
-      className="sticky top-0 z-20 -mx-4 border-b border-line bg-canvas/90 px-4 backdrop-blur lg:-mx-8 lg:px-8"
+      className="sticky top-[var(--shell-offset,8.5rem)] z-20 -mx-4 border-b border-line bg-[#04050a]/92 px-4 backdrop-blur lg:-mx-8 lg:px-8"
       data-testid="ticket-section-nav"
     >
       <ul className="m-0 flex list-none gap-1 overflow-x-auto p-0 py-2">
@@ -118,7 +125,7 @@ export function TicketSection({
       tabIndex={-1}
       aria-labelledby={`${id}-heading`}
       data-testid={testId}
-      className="scroll-mt-16 space-y-4 outline-none"
+      className="scroll-mt-36 space-y-4 outline-none"
     >
       <div>
         <h2 id={`${id}-heading`} className="text-xl font-semibold text-ink">

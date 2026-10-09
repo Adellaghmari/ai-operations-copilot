@@ -70,9 +70,11 @@ export function AboutPage() {
   const mode = health.data ? describeAppMode(health.data) : null;
   return (
     <div className="space-y-10">
+      <div className="ambient-hero">
       <PageHeader
         eyebrow="Project"
         title="About the Project"
+        display
         description={
           <>
             <p className="font-medium text-ink">The model proposes. The system challenges. The human decides.</p>
@@ -83,6 +85,7 @@ export function AboutPage() {
           </>
         }
       />
+      </div>
 
       <Block id="problem" title="The problem">
         <p className="max-w-3xl text-sm leading-6 text-ink-soft">
@@ -225,6 +228,15 @@ export function AboutPage() {
           </li>
           <li>
             <Link className="underline" to="/evaluations">Evaluation lab</Link>
+          </li>
+          <li>
+            <Link className="underline" to="/architecture">Architecture</Link>
+          </li>
+          <li>
+            <Link className="underline" to="/assurance">Decision Assurance</Link>
+          </li>
+          <li>
+            <Link className="underline" to="/replay">Decision Replay</Link>
           </li>
         </ul>
       </Block>

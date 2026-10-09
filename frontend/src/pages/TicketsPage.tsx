@@ -13,12 +13,13 @@ import {
   scenarioInfo,
   ticketStatusTone,
 } from "../lib/presentation";
-import { formatRelative, humanize } from "../lib/utils";
+import { formatExactTime, formatRelative, humanize } from "../lib/utils";
 import { QueryState } from "../components/QueryState";
 import {
   Badge,
   Button,
   Card,
+  Chip,
   EmptyState,
   Field,
   Input,
@@ -88,6 +89,13 @@ export function TicketsPage() {
     placeholderData: keepPreviousData,
   });
 
+  const quickFilters: { label: string; key: FilterKey; value: string }[] = [
+    { label: "Open", key: "status", value: "open" },
+    { label: "Awaiting human", key: "ai_review_status", value: "awaiting_human" },
+    { label: "Severity P1", key: "severity", value: "P1" },
+    { label: "Security bypass", key: "demo_scenario", value: "security_bypass" },
+  ];
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -100,6 +108,18 @@ export function TicketsPage() {
           </Link>
         }
       />
+
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Quick filters">
+        {quickFilters.map((item) => (
+          <Chip
+            key={item.label}
+            active={filters[item.key] === item.value}
+            onClick={() => updateParam(item.key, filters[item.key] === item.value ? "" : item.value)}
+          >
+            {item.label}
+          </Chip>
+        ))}
+      </div>
 
       <Card className="space-y-3">
         <form
@@ -279,7 +299,7 @@ export function TicketsPage() {
                       return (
                         <tr
                           key={ticket.id}
-                          className="cursor-pointer border-t border-line hover:bg-surface-2"
+                          className="cursor-pointer border-t border-line transition-colors hover:bg-violet/[0.07]"
                           onClick={(event) => {
                             if ((event.target as HTMLElement).closest("a")) return;
                             navigate(`/tickets/${ticket.id}`);
@@ -311,7 +331,9 @@ export function TicketsPage() {
                           <td className="px-4 py-3">
                             <AiState ticket={ticket} />
                           </td>
-                          <td className="px-4 py-3 text-muted">{formatRelative(ticket.updated_at)}</td>
+                          <td className="px-4 py-3 text-muted" title={formatExactTime(ticket.updated_at)}>
+                            {formatRelative(ticket.updated_at)}
+                          </td>
                         </tr>
                       );
                     })}
@@ -331,7 +353,8 @@ export function TicketsPage() {
                         {ticket.display_id}: {ticket.subject}
                       </Link>
                       <p className="mt-1 text-xs text-muted">
-                        {ticket.customer?.company ?? "Customer not recorded"}, updated {formatRelative(ticket.updated_at)}
+                        {ticket.customer?.company ?? "Customer not recorded"}, updated{" "}
+                        <span title={formatExactTime(ticket.updated_at)}>{formatRelative(ticket.updated_at)}</span>
                       </p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         <Badge>{ticket.severity ?? "Not triaged"}</Badge>

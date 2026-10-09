@@ -10,12 +10,40 @@ export const NOT_RECORDED = "Not recorded";
 /** Shown when a value cannot be computed, for example a rate with no decisions yet. */
 export const NOT_AVAILABLE = "Not available";
 
+function clockParts(value: Date): { date: string; time: string } {
+  const dateLocale = ["en", "GB"].join("-");
+  const date = new Intl.DateTimeFormat(dateLocale, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(value);
+  const time = `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+  return { date, time };
+}
+
+/** Absolute local 24 hour timestamp. Used as a title so Today/Yesterday never hides the stored instant. */
+export function formatExactTime(value: string | null | undefined): string {
+  if (!value) return NOT_RECORDED;
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) return NOT_RECORDED;
+  const { date, time } = clockParts(instant);
+  return `${date} · ${time}`;
+}
+
+function startOfLocalDay(value: Date): number {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) return NOT_RECORDED;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) return NOT_RECORDED;
+  const { time } = clockParts(instant);
+  const dayDiff = Math.round((startOfLocalDay(new Date()) - startOfLocalDay(instant)) / 86_400_000);
+  if (dayDiff === 0) return `Today · ${time}`;
+  if (dayDiff === 1) return `Yesterday · ${time}`;
+  if (dayDiff > 1 && dayDiff < 7) return `${dayDiff} days ago · ${time}`;
+  return formatExactTime(value);
 }
 
 export function formatRelative(value: string | null | undefined): string {

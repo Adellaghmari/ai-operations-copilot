@@ -134,6 +134,26 @@ describe("secondary pages", () => {
       expect(within(detail).getByTestId("run-timeline")).toHaveTextContent("780 ms");
     });
 
+    it("summarises loaded runs and filters them without inventing matches", async () => {
+      const user = userEvent.setup();
+      ({ restore } = installMockApi([
+        { match: /^\/api\/ai-runs\?/, json: { items: [RUN], total: 1, page: 1, page_size: 100 } },
+        { match: /^\/api\/tickets\?/, json: TICKET_PAGE },
+      ]));
+      renderPage(<AiRunsPage />, { path: "/ai-runs" });
+      const summary = await screen.findByTestId("run-summary");
+      expect(within(summary).getByText("Stored runs")).toBeInTheDocument();
+      expect(within(summary).getByText("Awaiting human decision")).toBeInTheDocument();
+      expect(within(summary).getByText("Test fixture runs")).toBeInTheDocument();
+      expect(screen.getByTestId("run-pipeline")).toHaveTextContent("Triage");
+      expect(screen.getByTestId("run-pipeline")).toHaveTextContent("Stored");
+      await user.click(screen.getByRole("button", { name: "Revised" }));
+      expect(screen.getByText("No stored runs match this filter")).toBeInTheDocument();
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      await user.click(within(screen.getByRole("group", { name: "Filter stored runs" })).getByRole("button", { name: "All runs" }));
+      expect(await screen.findByRole("table")).toBeInTheDocument();
+    });
+
     it("shows an error rather than an empty list when runs cannot load", async () => {
       ({ restore } = installMockApi([
         { match: /^\/api\/ai-runs\?/, status: 500 },
@@ -159,7 +179,19 @@ describe("secondary pages", () => {
       ({ restore } = installMockApi([{ match: "/api/health", json: HEALTH_TEST_MODE }]));
       renderPage(<AboutPage />, { path: "/about" });
       await screen.findByText("Test fixture mode");
-      const real = new Set(["/", "/tickets", "/tickets/new", "/knowledge", "/ai-runs", "/evaluations", "/feedback", "/about"]);
+      const real = new Set([
+        "/",
+        "/tickets",
+        "/tickets/new",
+        "/knowledge",
+        "/ai-runs",
+        "/evaluations",
+        "/feedback",
+        "/about",
+        "/architecture",
+        "/assurance",
+        "/replay",
+      ]);
       for (const link of screen.getAllByRole("link")) {
         expect(real.has(link.getAttribute("href") ?? "")).toBe(true);
       }
@@ -173,27 +205,86 @@ describe("secondary pages", () => {
       renderPage(<AppShell />, { path: "/" });
       const nav = screen.getByRole("navigation", { name: "Primary" });
       expect(within(nav).getByRole("link", { name: "About" })).toHaveAttribute("href", "/about");
-      expect(within(nav).queryByRole("link", { name: "Architecture" })).not.toBeInTheDocument();
-      expect(NAV_GROUPS.flatMap((group) => group.links).length).toBe(8);
-      expect(await screen.findByText("Test fixture mode")).toBeInTheDocument();
+      expect(within(nav).getByRole("link", { name: "Architecture" })).toHaveAttribute("href", "/architecture");
+      expect(within(nav).getByRole("link", { name: "Replay" })).toHaveAttribute("href", "/replay");
+      expect(within(nav).getByRole("link", { name: "Assurance" })).toHaveAttribute("href", "/assurance");
+      expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
+      expect(within(nav).queryByRole("button")).not.toBeInTheDocument();
+      expect(within(nav).queryByRole("menu")).not.toBeInTheDocument();
+      expect(NAV_GROUPS.flatMap((group) => group.links).length).toBe(11);
+      expect((await screen.findAllByText("Test fixture mode")).length).toBeGreaterThan(0);
       expect(screen.queryByText("Foundry live")).not.toBeInTheDocument();
+      expect(screen.getByTestId("centered-brand")).toBeInTheDocument();
+      expect(screen.getByTestId("brand-home")).toHaveAttribute("href", "/");
+    });
+
+    it("shows every desktop route without opening a menu", () => {
+      ({ restore } = installMockApi([{ match: "/api/health", json: HEALTH_TEST_MODE }]));
+      renderPage(<AppShell />, { path: "/" });
+      const nav = screen.getByRole("navigation", { name: "Primary" });
+      const routes: [string, string][] = [
+        ["Dashboard", "/"],
+        ["Ticket queue", "/tickets"],
+        ["New ticket", "/tickets/new"],
+        ["AI runs", "/ai-runs"],
+        ["Replay", "/replay"],
+        ["Assurance", "/assurance"],
+        ["Knowledge base", "/knowledge"],
+        ["Evaluation", "/evaluations"],
+        ["Feedback", "/feedback"],
+        ["Architecture", "/architecture"],
+        ["About", "/about"],
+      ];
+      for (const [name, href] of routes) {
+        expect(within(nav).getByRole("link", { name })).toHaveAttribute("href", href);
+      }
     });
 
     it("shows API unreachable instead of a mode when health fails", async () => {
       ({ restore } = installMockApi([{ match: "/api/health", networkError: true }]));
       renderPage(<AppShell />, { path: "/" });
-      expect(await screen.findByText("API unreachable")).toBeInTheDocument();
+      expect((await screen.findAllByText("API unreachable")).length).toBeGreaterThan(0);
     });
 
-    it("collapses the menu on small screens behind an accessible toggle", async () => {
+    it("opens mobile navigation as an accessible drawer", async () => {
       const user = userEvent.setup();
       ({ restore } = installMockApi([{ match: "/api/health", json: HEALTH_TEST_MODE }]));
       renderPage(<AppShell />, { path: "/" });
       const toggle = screen.getByRole("button", { name: "Menu" });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveAttribute("aria-controls", "primary-navigation");
+      expect(toggle).toHaveAttribute("aria-controls", "mobile-navigation");
       await user.click(toggle);
-      expect(screen.getByRole("button", { name: "Close menu" })).toHaveAttribute("aria-expanded", "true");
+      const drawer = screen.getByRole("dialog", { name: "Product navigation" });
+      expect(drawer).toHaveAttribute("aria-modal", "true");
+      expect(within(drawer).getByRole("link", { name: /About/ })).toHaveAttribute("href", "/about");
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog", { name: "Product navigation" })).not.toBeInTheDocument();
+    });
+
+    it("gives route links a bounded control treatment before hover", () => {
+      ({ restore } = installMockApi([{ match: "/api/health", json: HEALTH_TEST_MODE }]));
+      renderPage(<AppShell />, { path: "/" });
+      const link = within(screen.getByRole("navigation", { name: "Primary" })).getByRole("link", { name: "Dashboard" });
+      expect(link.className).toContain("font-semibold");
+      expect(link.className).toContain("border");
+      expect(link.className).toContain("rounded-md");
+      expect(link).toHaveAttribute("aria-current", "page");
+    });
+
+    it("shows a page context capsule and links a parent only when it has a route", () => {
+      ({ restore } = installMockApi([{ match: "/api/health", json: HEALTH_TEST_MODE }]));
+      const homePage = renderPage(<AppShell />, { path: "/" });
+      const home = screen.getAllByRole("navigation", { name: "Page context" })[0];
+      expect(within(home).getByText("Workspace")).toBeInTheDocument();
+      expect(within(home).getByText("Dashboard")).toHaveAttribute("aria-current", "page");
+      expect(within(home).queryByRole("link")).not.toBeInTheDocument();
+      homePage.unmount();
+      restore();
+      ({ restore } = installMockApi([{ match: "/api/health", json: HEALTH_TEST_MODE }]));
+      renderPage(<AppShell />, { path: "/replay" });
+      const replay = screen.getAllByRole("navigation", { name: "Page context" })[0];
+      expect(within(replay).getByRole("link", { name: "Decision intelligence" })).toHaveAttribute("href", "/ai-runs");
+      expect(within(replay).getByText("Decision Replay")).toHaveAttribute("aria-current", "page");
     });
 
     it("has exactly one level one heading slot for pages and a skip link", () => {

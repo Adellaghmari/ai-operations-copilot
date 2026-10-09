@@ -1,8 +1,10 @@
+import { afterEach, vi } from "vitest";
 import {
   NOT_AVAILABLE,
   NOT_RECORDED,
   formatDate,
   formatDuration,
+  formatExactTime,
   formatModelLabel,
   formatOutcome,
   formatRelative,
@@ -61,6 +63,40 @@ describe("formatting", () => {
   it("labels scenarios and models for readers", () => {
     expect(scenarioLabel("security_bypass")).toBe("Security risk");
     expect(formatModelLabel("gpt-5-mini")).toBe("GPT 5 Mini");
+  });
+});
+
+describe("timestamps stay 24 hour and do not invent stored instants", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("labels today and yesterday in 24 hour time without AM or PM", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 9, 16, 48, 0));
+    expect(formatDate(new Date(2026, 9, 9, 16, 48, 0).toISOString())).toBe("Today · 16:48");
+    expect(formatDate(new Date(2026, 9, 8, 21, 12, 0).toISOString())).toBe("Yesterday · 21:12");
+    expect(formatDate(new Date(2026, 9, 7, 19, 32, 0).toISOString())).toBe("2 days ago · 19:32");
+    expect(formatDate(new Date(2026, 9, 9, 16, 48, 0).toISOString())).not.toMatch(/\b(?:AM|PM)\b/i);
+  });
+
+  it("relabels the same stored instant when the local day changes", () => {
+    vi.useFakeTimers();
+    const stored = new Date(2026, 9, 9, 17, 37, 0);
+    vi.setSystemTime(new Date(2026, 9, 9, 18, 0, 0));
+    expect(formatDate(stored.toISOString())).toBe("Today · 17:37");
+    vi.setSystemTime(new Date(2026, 9, 10, 9, 18, 0));
+    expect(formatDate(stored.toISOString())).toBe("Yesterday · 17:37");
+    expect(formatExactTime(stored.toISOString())).toBe("9 Oct 2026 · 17:37");
+  });
+
+  it("keeps an older stored instant as an absolute 24 hour clock", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 9, 16, 48, 0));
+    const stored = new Date(2026, 9, 1, 8, 0, 0);
+    expect(formatDate(stored.toISOString())).toBe("1 Oct 2026 · 08:00");
+    expect(formatExactTime(stored.toISOString())).toBe("1 Oct 2026 · 08:00");
+    expect(formatExactTime(stored.toISOString())).not.toMatch(/\b(?:AM|PM)\b/i);
   });
 });
 
