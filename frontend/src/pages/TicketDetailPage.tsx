@@ -1,203 +1,309 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
-import { api, type RetrievedChunk } from "../lib/api";
-import { formatDate } from "../lib/utils";
-import { Badge, Button, Card, ErrorState, Field, Skeleton, Textarea } from "../components/ui";
+import { Link, useLocation, useParams } from "react-router-dom";
+import { api } from "../lib/api";
+import { describeError } from "../lib/errors";
+import {
+  describeProvider,
+  gateTone,
+  hasDraft as runHasDraft,
+  humanDecisionLabel,
+  ticketStatusTone,
+} from "../lib/presentation";
+import { formatModelLabel, formatOutcome, humanize } from "../lib/utils";
+import { Badge, Button, Card, DegradedNotice, ErrorState, LoadingState } from "../components/ui";
+import { AssuranceSection } from "./ticket/AssuranceSection";
+import { DecisionPacketDialog } from "./ticket/DecisionPacketDialog";
+import { DecisionSection } from "./ticket/DecisionSection";
+import type { DecisionSubmission } from "./ticket/DecisionSection";
+import { EvidenceSection } from "./ticket/EvidenceSection";
+import {
+  CaseCard,
+  DecisionTrail,
+  OutcomeBanner,
+  RunProviderNotice,
+  TriageCard,
+} from "./ticket/OverviewSection";
+import { RecommendationSection } from "./ticket/RecommendationSection";
+import { ReplaySection } from "./ticket/ReplaySection";
+import { ReviewSection } from "./ticket/ReviewSection";
+import { SectionNav, TICKET_SECTIONS, TicketSection } from "./ticket/SectionNav";
+
+const FAILURE_STATUSES = new Set(["failed", "foundry_unavailable", "quota_exceeded"]);
 
 export function TicketDetailPage() {
   const { ticketId } = useParams();
+  const location = useLocation();
   const queryClient = useQueryClient();
+  const [showPacket, setShowPacket] = useState(false);
+  const [lastDecision, setLastDecision] = useState<string | null>(null);
+  const justCreated = Boolean((location.state as { justCreated?: boolean } | null)?.justCreated);
+
   const ticket = useQuery({
     queryKey: ["ticket", ticketId],
     queryFn: () => api.ticket(ticketId!),
     enabled: Boolean(ticketId),
   });
   const runs = useQuery({
-    queryKey: ["runs"],
-    queryFn: api.aiRuns,
+    queryKey: ["ticket-runs", ticketId],
+    queryFn: () => api.aiRuns(ticketId),
+    enabled: Boolean(ticketId),
   });
-  const runId = useMemo(
-    () => runs.data?.items.find((item) => item.ticket_id === ticketId)?.id,
-    [runs.data, ticketId],
-  );
-  const run = useQuery({
-    queryKey: ["run", runId],
-    queryFn: () => api.aiRun(runId!),
-    enabled: Boolean(runId),
+  const latestRunId = runs.data?.items[0]?.id;
+  const runQuery = useQuery({
+    queryKey: ["run", latestRunId],
+    queryFn: () => api.aiRun(latestRunId!),
+    enabled: Boolean(latestRunId),
   });
-  const [draft, setDraft] = useState("");
-  const [feedback, setFeedback] = useState("");
-  const [label, setLabel] = useState("fully_useful");
-  const [selectedChunk, setSelectedChunk] = useState<RetrievedChunk | null>(null);
 
   const analyze = useMutation({
-    mutationFn: () => api.runAi(ticketId!, feedback || undefined),
+    mutationFn: () => api.runAi(ticketId!),
     onSuccess: async () => {
+      setLastDecision(null);
       await queryClient.invalidateQueries();
     },
   });
   const review = useMutation({
-    mutationFn: (decision: string) =>
-      api.review(ticketId!, run.data!.id, {
-        decision,
-        edited_response: draft || run.data?.original_customer_response || undefined,
-        feedback,
-        label,
-      }),
-    onSuccess: async () => {
+    mutationFn: (submission: DecisionSubmission) => {
+      const runId = latestRunId ?? analyze.data?.id;
+      if (!runId) throw new Error("There is no AI run to review.");
+      return api.review(ticketId!, runId, {
+        decision: submission.decision,
+        edited_response: submission.editedResponse,
+        feedback: submission.feedback || undefined,
+        label: submission.label || undefined,
+      });
+    },
+    onSuccess: async (_run, submission) => {
+      setLastDecision(
+        submission.decision === "regenerate"
+          ? "Regeneration was recorded and a new AI run was created."
+          : `Decision recorded: ${humanDecisionLabel(submission.decision)}. Nothing was sent to the customer.`,
+      );
       await queryClient.invalidateQueries();
     },
   });
 
-  if (ticket.isError) return <ErrorState message={(ticket.error as Error).message} />;
-  if (!ticket.data) return <Skeleton className="h-80" />;
+  if (ticket.isPending) {
+    return <LoadingState label="Loading ticket" rows={4} />;
+  }
+  if (ticket.isError && !ticket.data) {
+    return (
+      <div className="space-y-3">
+        <ErrorState
+          title="This ticket could not be loaded"
+          error={ticket.error}
+          onRetry={() => void ticket.refetch()}
+          retrying={ticket.isFetching}
+        />
+        <Link className="text-sm underline" to="/tickets">
+          Back to the ticket queue
+        </Link>
+      </div>
+    );
+  }
+  const data = ticket.data!;
 
-  const current = run.data;
-  const chunks = (current?.retrieval_result?.chunks ?? []) as RetrievedChunk[];
-  const reviewResult = current?.review_result as Record<string, unknown> | null;
-  const triage = current?.triage_result as Record<string, unknown> | null;
+  // The newest persisted run. A fresh analysis result bridges the gap until the refetch lands.
+  const bridged = [analyze.data, review.data].find((candidate) => candidate && candidate.id === latestRunId);
+  const current = runQuery.data ?? bridged;
+  const runStillLoading = Boolean(latestRunId) && runQuery.isPending && !current;
+  const report = current?.assurance_report ?? undefined;
+  const abstained = Boolean(current?.abstained || report?.abstention?.abstained);
+  const draftAvailable = runHasDraft(current);
+  const provider = current ? describeProvider(current.provider_kind) : null;
+  const runList = runs.data?.items ?? [];
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm text-stone-500">{ticket.data.display_id}</p>
-          <h1 className="text-2xl font-semibold">{ticket.data.subject}</h1>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Badge>{ticket.data.status}</Badge>
-            {ticket.data.severity ? <Badge tone="warn">{ticket.data.severity}</Badge> : null}
-            {ticket.data.category ? <Badge>{ticket.data.category}</Badge> : null}
-          </div>
-        </div>
-        <Button onClick={() => analyze.mutate()} disabled={analyze.isPending}>
-          {analyze.isPending ? "Running workflow…" : "Run AI analysis"}
-        </Button>
-      </div>
-      {analyze.isError ? <ErrorState message={(analyze.error as Error).message} /> : null}
-      {current?.provider_kind === "test_fixture" ? (
-        <Card className="border-amber-200 bg-amber-50">
-          This run used the test fixture provider. It is not a Microsoft Foundry response.
-        </Card>
-      ) : null}
-      {current?.status === "foundry_unavailable" ? (
-        <Card className="border-amber-200 bg-amber-50">
-          Microsoft Foundry is unavailable. Configure APP_MODE=foundry and the project endpoints.
-          {current.error_message ? <p className="mt-2 text-sm">{current.error_message}</p> : null}
-        </Card>
-      ) : null}
-
-      <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card>
-          <h2 className="font-semibold">Customer context</h2>
-          <p className="mt-2 text-sm text-stone-600">
-            {ticket.data.customer?.company} · {ticket.data.customer?.name} · {ticket.data.customer?.plan}
-          </p>
-          <p className="mt-3 whitespace-pre-wrap text-sm">{ticket.data.body}</p>
-          <h3 className="mt-5 text-sm font-semibold">Conversation</h3>
-          <ul className="mt-2 space-y-2 text-sm">
-            {ticket.data.messages.map((message) => (
-              <li key={message.id} className="rounded-md bg-stone-50 p-3">
-                <p className="text-xs text-stone-500">{message.author_name} · {formatDate(message.created_at)}</p>
-                <p className="mt-1">{message.body}</p>
-              </li>
-            ))}
-          </ul>
-        </Card>
-        <Card>
-          <h2 className="font-semibold">Workflow timeline</h2>
-          <ol className="mt-3 space-y-2 text-sm">
-            {(current?.steps ?? []).map((step) => (
-              <li key={step.id} className="flex justify-between gap-3">
-                <span>{step.name.replaceAll("_", " ")}</span>
-                <span className="text-stone-500">{step.status}{step.duration_ms ? ` · ${step.duration_ms} ms` : ""}</span>
-              </li>
-            ))}
-            {!current?.steps?.length ? <li className="text-stone-500">No AI run yet.</li> : null}
-          </ol>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <h2 className="font-semibold">Triage</h2>
-          {triage ? (
-            <dl className="mt-3 space-y-1 text-sm">
-              <div>Category: {String(triage.category)}</div>
-              <div>Severity: {String(triage.severity)}</div>
-              <div>Summary: {String(triage.ticket_summary)}</div>
-              <div>Reason: {String(triage.reasoning_summary)}</div>
-            </dl>
-          ) : (
-            <p className="mt-2 text-sm text-stone-500">Run analysis to generate structured triage.</p>
-          )}
-        </Card>
-        <Card>
-          <h2 className="font-semibold">Retrieved knowledge</h2>
-          <ul className="mt-3 space-y-2 text-sm">
-            {chunks.map((chunk) => (
-              <li key={chunk.chunk_id}>
-                <button className="text-left hover:underline" onClick={() => setSelectedChunk(chunk)}>
-                  {chunk.document_name} · {chunk.section} ({chunk.retrieval_score.toFixed(3)})
-                </button>
-              </li>
-            ))}
-            {chunks.length === 0 ? <li className="text-stone-500">No sources retrieved yet.</li> : null}
-          </ul>
-          {selectedChunk ? (
-            <div className="mt-3 rounded-md bg-stone-50 p-3 text-sm">
-              <p className="font-medium">{selectedChunk.document_name}</p>
-              <p className="mt-2 whitespace-pre-wrap">{selectedChunk.body}</p>
-            </div>
-          ) : null}
-        </Card>
-      </div>
-
-      <Card>
-        <h2 className="font-semibold">Resolution and human review</h2>
-        <p className="mt-2 text-sm text-stone-600">
-          AI quality signal: {current?.quality_signal?.score ?? "—"} — evidence quality, not a probability of correctness.
+    <div className="space-y-8">
+      <header className="space-y-3">
+        <p className="text-sm text-muted">
+          <Link className="underline" to="/tickets">
+            Ticket queue
+          </Link>{" "}
+          / {data.display_id}
         </p>
-        <p className="mt-3 whitespace-pre-wrap text-sm">{current?.original_customer_response ?? "No draft yet."}</p>
-        {reviewResult ? <p className="mt-3 text-sm">Review: {String(reviewResult.status)} — {String(reviewResult.review_summary)}</p> : null}
-        <div className="mt-4 grid gap-3">
-          <Field label="Edit customer response">
-            <Textarea
-              rows={6}
-              value={draft || current?.original_customer_response || ""}
-              onChange={(event) => setDraft(event.target.value)}
-            />
-          </Field>
-          <Field label="Reviewer feedback">
-            <Textarea rows={3} value={feedback} onChange={(event) => setFeedback(event.target.value)} />
-          </Field>
-          <Field label="Feedback label">
-            <select className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm" value={label} onChange={(event) => setLabel(event.target.value)}>
-              <option value="fully_useful">fully useful</option>
-              <option value="minor_edits">minor edits</option>
-              <option value="major_edits">major edits</option>
-              <option value="wrong_knowledge">wrong knowledge</option>
-              <option value="hallucinated_detail">hallucinated detail</option>
-              <option value="wrong_severity">wrong severity</option>
-              <option value="bad_tone">bad tone</option>
-              <option value="missing_information">missing information</option>
-              <option value="should_have_escalated">should have escalated</option>
-            </select>
-          </Field>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 max-w-3xl">
+            <h1 className="text-2xl font-semibold tracking-tight text-ink">{data.subject}</h1>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Badge tone={ticketStatusTone(data.status)} title="Ticket status">
+                Ticket {humanize(data.status).toLowerCase()}
+              </Badge>
+              {data.severity ? <Badge tone="warn">Severity {data.severity}</Badge> : null}
+              {data.category ? <Badge>{humanize(data.category)}</Badge> : null}
+              {current?.assurance_outcome ? (
+                <Badge tone={gateTone(current.assurance_outcome)} title="Assurance outcome">
+                  {formatOutcome(current.assurance_outcome)}
+                </Badge>
+              ) : (
+                <Badge tone="neutral">No analysis yet</Badge>
+              )}
+              {provider ? (
+                <Badge tone={provider.tone} title={provider.description}>
+                  {provider.label}
+                </Badge>
+              ) : null}
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2">
-            <Button disabled={!current} onClick={() => review.mutate("approve")}>Approve</Button>
-            <Button variant="secondary" disabled={!current} onClick={() => review.mutate("edit_and_approve")}>Edit and approve</Button>
-            <Button variant="secondary" disabled={!current} onClick={() => review.mutate("reject")}>Reject</Button>
-            <Button variant="secondary" disabled={!current} onClick={() => review.mutate("regenerate")}>Regenerate</Button>
-            <Button variant="danger" disabled={!current} onClick={() => review.mutate("escalate")}>Escalate</Button>
+            {report ? (
+              <Button variant="secondary" data-testid="view-decision-packet" onClick={() => setShowPacket(true)}>
+                View Decision Packet
+              </Button>
+            ) : null}
+            <Button data-testid="run-ai-analysis" onClick={() => analyze.mutate()} disabled={analyze.isPending}>
+              {analyze.isPending ? "Running workflow" : current ? "Run AI analysis again" : "Run AI analysis"}
+            </Button>
           </div>
         </div>
-        {current ? (
-          <p className="mt-4 text-xs text-stone-500">
-            Prompt versions {JSON.stringify(current.prompt_versions)} · <Link className="underline" to={`/ai-runs/${current.id}`}>Open AI run</Link>
+      </header>
+
+      {justCreated ? (
+        <p role="status" className="rounded-md bg-lime/10 p-3 text-sm text-lime">
+          Ticket {data.display_id} was created. Run an AI analysis when you are ready. Nothing is sent to the
+          customer.
+        </p>
+      ) : null}
+      {ticket.isError ? (
+        <DegradedNotice onRetry={() => void ticket.refetch()} retrying={ticket.isFetching}>
+          Showing the last loaded ticket. Refreshing it failed.
+        </DegradedNotice>
+      ) : null}
+      {analyze.isPending ? (
+        <div role="status" className="rounded-lg border border-line-strong bg-surface p-4 text-sm text-ink">
+          <p className="font-medium">Running the workflow</p>
+          <p className="mt-1 text-muted">
+            Triage, hybrid retrieval, Resolution, Review, and the assurance gates run in sequence. A live model can
+            take a while. The page updates when the run is stored.
           </p>
-        ) : null}
-      </Card>
+        </div>
+      ) : null}
+      {analyze.isError ? (
+        <ErrorState
+          title="The analysis did not run"
+          message={describeError(analyze.error).summary}
+          onRetry={() => analyze.mutate()}
+        />
+      ) : null}
+      {current ? <RunProviderNotice run={current} /> : null}
+      {current && FAILURE_STATUSES.has(current.status) ? (
+        <div role="alert" className="rounded-lg border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-100">
+          <p className="font-semibold">This run did not complete: {humanize(current.status)}</p>
+          {current.status === "foundry_unavailable" ? (
+            <p className="mt-1">
+              Microsoft Foundry is not available in this environment. Real model output needs APP_MODE=foundry and the
+              project endpoints.
+            </p>
+          ) : null}
+          {current.error_message ? <p className="mt-1">{current.error_message}</p> : null}
+        </div>
+      ) : null}
+
+      <SectionNav sections={TICKET_SECTIONS} />
+
+      <TicketSection id="overview" title="Overview" description="Where this case stands, from the stored run.">
+        {runs.isError || (runQuery.isError && !current) ? (
+          <ErrorState
+            compact
+            title="The latest AI run could not be loaded"
+            error={runs.isError ? runs.error : runQuery.error}
+            onRetry={() => {
+              void runs.refetch();
+              void runQuery.refetch();
+            }}
+            retrying={runs.isFetching || runQuery.isFetching}
+          />
+        ) : runStillLoading || runs.isPending ? (
+          <LoadingState label="Loading the latest AI run" rows={2} />
+        ) : (
+          <>
+            {current && report ? (
+              <OutcomeBanner report={report} run={current} />
+            ) : (
+              <Card>
+                <p className="text-sm text-ink-soft">
+                  No AI analysis exists for this ticket yet. The workflow will triage the case, retrieve knowledge,
+                  draft a recommendation, challenge it, and check the evidence. A human then decides.
+                </p>
+              </Card>
+            )}
+            <DecisionTrail run={current} />
+          </>
+        )}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <CaseCard ticket={data} />
+          <TriageCard run={current} />
+        </div>
+      </TicketSection>
+
+      <TicketSection
+        id="evidence"
+        title="Evidence"
+        description="What was retrieved, which claims it supports, and where the knowledge falls short."
+      >
+        <EvidenceSection run={current} report={report} />
+      </TicketSection>
+
+      <TicketSection
+        id="recommendation"
+        title="AI recommendation"
+        description="A proposal for a human to review. It is never sent automatically."
+      >
+        <RecommendationSection run={current} abstained={abstained} />
+      </TicketSection>
+
+      <TicketSection
+        id="review"
+        title="Review"
+        description="The independent challenge, and the single allowed revision."
+      >
+        <ReviewSection run={current} report={report} />
+      </TicketSection>
+
+      <TicketSection
+        id="assurance"
+        title="Assurance"
+        description="Deterministic gates over evidence, conflicts, and actions. Each shows its reason."
+      >
+        <AssuranceSection run={current} report={report} />
+      </TicketSection>
+
+      <TicketSection id="decision" title="Decision" description="The human decision. Only a person can approve or act.">
+        <DecisionSection
+          key={current?.id ?? "no-run"}
+          run={current}
+          hasDraft={draftAvailable}
+          abstained={abstained}
+          pending={review.isPending}
+          error={review.isError ? review.error : null}
+          lastDecision={lastDecision}
+          onSubmit={(submission) => review.mutate(submission)}
+        />
+      </TicketSection>
+
+      <TicketSection id="replay" title="Replay" description="See what changed between two runs of this ticket.">
+        {runs.isError ? (
+          <ErrorState compact title="Runs could not be loaded for replay" error={runs.error} />
+        ) : (
+          <ReplaySection runs={runList} />
+        )}
+      </TicketSection>
+
+      {current ? (
+        <p className="text-xs text-muted">
+          Model {formatModelLabel(current.model_deployment)}. Embeddings {formatModelLabel(current.embedding_model)}.
+          Prompt versions {Object.entries(current.prompt_versions)
+            .map(([name, version]) => `${name} v${version}`)
+            .join(", ") || "not recorded"}
+          .{" "}
+          <Link className="underline" data-testid="open-ai-run" to={`/ai-runs/${current.id}`}>
+            Open AI run
+          </Link>
+        </p>
+      ) : null}
+
+      <DecisionPacketDialog open={showPacket} onClose={() => setShowPacket(false)} report={report} />
     </div>
   );
 }

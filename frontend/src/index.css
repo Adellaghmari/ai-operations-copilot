@@ -1,10 +1,29 @@
 @import "tailwindcss";
 
+@theme {
+  --font-sans: "Segoe UI", Aptos, ui-sans-serif, system-ui, sans-serif;
+  --color-canvas: #07090d;
+  --color-surface: #121820;
+  --color-surface-2: #1a2230;
+  --color-surface-3: #243044;
+  --color-line: #2c384c;
+  --color-line-strong: #3d4d66;
+  --color-ink: #f3f6ef;
+  --color-ink-soft: #d5dece;
+  --color-muted: #9aab9c;
+  --color-faint: #8d9a94;
+  --color-lime: #c6f04d;
+  --color-lime-deep: #a6cc32;
+  --color-lime-ink: #12160b;
+  --color-violet: #c4b5fd;
+  --color-violet-deep: #8b78e6;
+}
+
 :root {
-  color-scheme: light;
-  font-family: "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
-  background: #f4f1ea;
-  color: #1c1917;
+  color-scheme: dark;
+  font-family: "Segoe UI", Aptos, ui-sans-serif, system-ui, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink);
 }
 
 * {
@@ -15,10 +34,110 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top left, #efe7d6 0%, transparent 42%),
-    #f4f1ea;
+    radial-gradient(ellipse 42% 28% at 115% -8%, rgba(139, 120, 230, 0.16), transparent 70%),
+    radial-gradient(ellipse 36% 24% at -12% 108%, rgba(198, 240, 77, 0.07), transparent 68%),
+    var(--color-canvas);
+  overflow-wrap: break-word;
 }
 
-a {
-  color: inherit;
+th {
+  white-space: nowrap;
+}
+
+code {
+  overflow-wrap: anywhere;
+}
+
+::selection {
+  background: var(--color-lime);
+  color: var(--color-lime-ink);
+}
+
+/* In the base layer so Tailwind text color utilities on links, such as button styled links, win. */
+@layer base {
+  a {
+    color: inherit;
+    text-underline-offset: 3px;
+  }
+}
+
+/* Visible keyboard focus for every interactive element that does not set its own ring. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-lime);
+  outline-offset: 2px;
+}
+
+/* Subtle motion only. Reduced motion users get none. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.rise-in {
+  animation: rise-in 220ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+html {
+  scroll-padding-top: 7rem;
+}
+
+/* Printing an open dialog prints the dialog only, for example the Decision Packet. */
+@media print {
+  #root {
+    display: none !important;
+  }
+  .dialog-backdrop {
+    position: static !important;
+    background: transparent !important;
+    display: block !important;
+    padding: 0 !important;
+  }
+  .dialog-panel {
+    max-width: none !important;
+    max-height: none !important;
+    height: auto !important;
+    box-shadow: none !important;
+    background: white !important;
+    color: black !important;
+  }
+  .dialog-panel [data-no-print] {
+    display: none !important;
+  }
 }

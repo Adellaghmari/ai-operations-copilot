@@ -33,7 +33,7 @@ Not an LLM. Deterministic application logic:
 
 ### Resolution Agent
 
-Uses ticket context, triage, retrieved sources, and bounded tools. Returns a validated `ResolutionDraft`:
+Uses ticket context, triage, and retrieved sources from the hybrid retrieval executor. Returns a validated `ResolutionDraft`:
 
 - internal summary and recommended actions
 - customer response draft
@@ -48,30 +48,48 @@ The agent is instructed never to invent missing facts.
 
 Compares the draft with retrieved sources. Returns a validated `ReviewResult` with `PASS` or `REVISE`.
 
-If `REVISE`, the service allows **one** Resolution revision that includes reviewer feedback. A second failure forces human escalation.
+If `REVISE`, the service allows **one** Resolution revision that includes reviewer feedback. A second failure forces human escalation. `ESCALATE` is a valid Review verdict for security-sensitive bypass requests.
+
+## Decision Assurance Engine
+
+`DecisionAssuranceEngine` is application-owned deterministic logic. It is not a fourth LLM agent.
+
+It aggregates validated retrieval provenance, Resolution claims, and Review assessments, then computes:
+
+- Evidence Ledger support states
+- Assurance Gates
+- coverage counts such as `5 of 6 claims supported` (not model confidence)
+- potential conflicts only when both chunk IDs exist in the retrieval set
+- abstention
+- Decision Assurance Packet
+- revision delta
+
+The model may identify semantic issues. The application owns validation, gating, persistence, and the final machine state.
+
+Passing gates does not guarantee correctness. Human review remains mandatory.
 
 ## Orchestration
 
-Microsoft Agent Framework `SequentialBuilder`:
+Live API orchestration is `SupportWorkflowRunner`, which calls Agent Framework chat agents for Triage, Resolution, and Review and inserts a deterministic retrieval step between Triage and Resolution:
 
-`Triage → Retrieval Executor → Resolution → Review`
+`Triage → Hybrid Retrieval Executor → Resolution → Review → Decision Assurance Engine → Human`
 
-The one-revision bound lives in the application service, not in an unbounded graph loop. Each stage is persisted so the UI can show a timeline.
+A `SequentialBuilder` helper remains in the repository for framework import verification. It is not the production request path. The one-revision bound lives in the application service, not in an unbounded graph loop. Each stage is persisted so the UI can show a timeline.
 
 ## Structured output
 
-Agents use schema-based structured output (`response_format` with Pydantic models). Server-side validation is mandatory. Invalid output is retried with a bounded policy and never written as application state.
+Agents use schema-based structured output (`response_format` with Pydantic models). Server-side validation is mandatory. The provider does not retry malformed structured output. Validation failure is recorded as an explicit failed run rather than being written as successful application state.
 
 ## Tool calling
 
-Read-only tools with typed inputs, bounded results, and logging:
+Typed, read-only helper functions exist in `app/ai/tools.py`:
 
 - `search_knowledge`
 - `get_ticket_history`
 - `get_customer_context`
 - `get_similar_resolved_tickets`
 
-No tool mutates tickets, customers, or knowledge autonomously.
+They accept bounded inputs, return bounded results, and can be logged. They are **not** wired into Foundry LLM tool calling on the application request path. Retrieval runs through the hybrid retrieval executor (vector + lexical + RRF), not agent tool use. Do not claim model tool calling.
 
 ## RAG and embeddings
 
@@ -91,8 +109,12 @@ Original and edited drafts are both stored.
 
 ## Quality signal
 
-Displayed as **AI quality signal**, never as a probability of correctness. Calculated from retrieval coverage, mean retrieval score, citation coverage, review outcome, and missing-information flags. See [EVALUATION.md](EVALUATION.md).
+The backend computes and stores a component based **AI quality signal** from retrieval coverage, mean retrieval score, citation coverage, review outcome, and missing-information flags. The current interface does not display its numeric score. It is not a probability of correctness. See [EVALUATION.md](EVALUATION.md).
 
 ## Failure behavior
 
 Timeouts, validation failures, empty retrieval, unavailable Foundry, exhausted demo quota, and double review failure all surface as explicit product states. The system does not fabricate a successful answer.
+
+## Observability
+
+The application uses OpenTelemetry. In production, spans export to Application Insights via `AzureMonitorTraceExporter` and `APPLICATIONINSIGHTS_CONNECTION_STRING`. Agent Framework `configure_otel_providers(enable_sensitive_data=False)` remains in place. Safe attributes include run ID, agent name, provider kind, model deployment, embedding model, retrieval counts, revision count, assurance outcome, claim counts, conflict counts, abstention boolean, and human-review state. Ticket text, prompts, retrieved chunk bodies, and credentials are not exported.

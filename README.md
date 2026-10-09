@@ -1,144 +1,135 @@
 # AI Operations Copilot
 
-Human reviewed AI for intelligent support operations.
+**Evidence. Challenge. Human Decision.**
 
-AI Operations Copilot is a support operations workspace. It receives a customer issue, runs a structured three-agent workflow, retrieves internal knowledge with hybrid search, drafts a grounded recommendation, reviews that draft for unsupported claims, and requires a human decision before anything is treated as accepted.
+AI Operations Copilot is a human reviewed AI workspace demonstrated on support operations. It addresses a specific failure mode: a fluent model answer can still be unsupported, incomplete, or unsafe.
 
-This is a portfolio project by Adel Laghmari. It demonstrates applied AI engineering. It does not imply professional employment experience with these technologies.
+The model proposes. The system challenges. The human decides.
 
-## Live demo
+This is a portfolio engineering project by Adel Laghmari. It demonstrates practical project experience, not employment experience or a commercial production service.
 
-Not deployed yet. The public URL will be added here after a successful smoke test.
+## What makes it different
 
-## Screenshots
+The application does not treat a model draft as a decision. Three AI stages produce and review a recommendation. Application owned deterministic logic then checks whether that recommendation is supportable.
 
-Placeholders until the UI is built and captured:
+The **Decision Assurance Engine** provides:
 
-- Dashboard
-- Ticket queue
-- AI workspace
-- Knowledge base
-- Evaluation lab
+- **Assurance Gates** with explicit `PASS`, `WARNING`, `BLOCKED`, `HUMAN_REQUIRED`, and `ESCALATE` states
+- an **Evidence Ledger** that maps claims to retrieved chunks
+- **Potential Conflict Detection** for retrieved sources that may disagree
+- **Safe Abstention** when the system should not recommend an action
+- a printable **Decision Packet**
+- deterministic **Decision Replay** between stored runs
 
-## What the product does
+These are inspectable evidence and process signals. They are not confidence percentages. The engine is application logic, not a fourth LLM agent.
 
-1. Understand and triage the ticket
-2. Retrieve relevant knowledge with vector + lexical hybrid search
-3. Generate a grounded resolution and customer draft
-4. Review the draft for grounding, tone, and escalation rules
-5. Allow one bounded revision
-6. Require human approve / edit / reject / regenerate / escalate
-7. Store feedback and AI run metadata
-8. Evaluate the system over time
+## System flow
 
-The AI never sends a message to an external customer.
-
-## Architecture
-
-```
-React (Vite)  →  FastAPI  →  PostgreSQL + pgvector
-                     ↓
-         Microsoft Agent Framework
-                     ↓
-     Microsoft Foundry Responses API
+```mermaid
+flowchart LR
+  Case --> Triage[Triage agent]
+  Triage --> Retrieval[Hybrid retrieval]
+  Retrieval --> Resolution[Resolution agent]
+  Resolution --> Review[Review agent]
+  Review -->|At most one revision| Resolution
+  Review --> Assurance[Decision Assurance Engine]
+  Assurance --> Human[Human decision]
 ```
 
-Three specialized agents plus one deterministic retrieval executor:
+Hybrid retrieval combines PostgreSQL full text search and pgvector similarity search with Reciprocal Rank Fusion. The AI never sends a customer message. A person approves, edits, rejects, regenerates, or escalates.
 
-`Ticket → Triage → Hybrid retrieval → Resolution → Review → optional single revision → Human review`
+## Stack
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/AI_SYSTEM_DESIGN.md](docs/AI_SYSTEM_DESIGN.md).
-
-## Technology stack
-
-- Python, FastAPI, Pydantic, SQLAlchemy 2, Alembic
-- React, TypeScript, Vite, Tailwind CSS, shadcn/ui
-- PostgreSQL, pgvector
+- React, TypeScript, Vite, Tailwind CSS, TanStack Query, project owned UI components
+- FastAPI, Pydantic, SQLAlchemy 2 async, Alembic
+- PostgreSQL 16, pgvector, full text search, Reciprocal Rank Fusion
 - Microsoft Agent Framework
-- Microsoft Foundry (chat via project endpoint, embeddings via models endpoint)
-- OpenTelemetry
-- Docker Compose
-- pytest, Vitest, Playwright
+- Microsoft Foundry project Responses API through `FoundryChatClient`
+- Azure OpenAI v1 embeddings with Microsoft Entra authentication
+- Docker Compose, pytest, Vitest, Playwright, GitHub Actions
+- Azure Container Apps and Vercel deployment definitions
 
-## Modes
+## Runtime modes
 
-| `APP_MODE` | Meaning |
+| Mode | Behavior |
 |---|---|
-| `local` | Full product except live model calls. AI actions report Foundry unavailable if credentials are missing. |
-| `test` | Deterministic fixtures for automated tests. Never presented as Foundry. |
-| `foundry` | Real Foundry chat and embeddings. |
+| `local` | Product and data features work locally. Model actions report Foundry unavailable unless configured. |
+| `test` | Deterministic fixture provider used by tests and the seeded recruiter path. Output is labelled as a test fixture. |
+| `foundry` | Real Foundry chat and Azure OpenAI embeddings. Only this mode may advertise Foundry execution. |
 
-## Local setup
+Production rejects `APP_MODE=test`. Anonymous public deployments disable demo reset, knowledge mutations, and evaluation execution. Public synthetic ticket growth is capped, each run accepts one human decision, and AI runs plus regenerations share a daily guest quota.
 
-1. Copy `.env.example` to `.env`.
-2. Start the stack:
+## Run locally
+
+Copy `.env.example` to `.env`, then start the stack:
 
 ```bash
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-3. Open `http://localhost:5173`.
-4. API docs: `http://localhost:8000/docs`.
+Open:
 
-Without Docker, run PostgreSQL with pgvector, then:
+- Frontend: http://localhost:5173
+- API documentation: http://localhost:8000/docs
+- Liveness: http://localhost:8000/api/health
+- Readiness: http://localhost:8000/api/ready
 
-```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e ".[dev]"
-alembic upgrade head
-python -m scripts.seed
-uvicorn app.main:app --reload --app-dir .
-```
+The seeded test workspace contains synthetic customers, tickets, and knowledge only.
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-## Environment configuration
-
-See `.env.example`. Foundry variables are required only for `APP_MODE=foundry`.
-
-Do not commit secrets. Do not paste keys into source files.
-
-## Tests
+## Quality gate
 
 ```bash
 cd backend
+python -m ruff check .
 python -m pytest
 ```
 
 ```bash
 cd frontend
+npm ci
+npm run typecheck
+npm run lint
 npm test
+npm run audit:copy
+npm run build
 npx playwright test
 ```
 
-Cloud model tests are skipped unless explicitly opted in.
+Default tests do not call paid cloud models. The browser suite uses seeded PostgreSQL and `APP_MODE=test`.
 
-## Evaluation
+The Evaluation Lab runs deterministic fixture outputs against 44 synthetic golden cases. Classification, severity, escalation, and structured output checks are computed. Retrieval recall and citation coverage are not measured in that path because retrieval is empty. It is not an end to end retrieval benchmark.
 
-```bash
-cd backend
-python -m evals.run_deterministic
-```
+## Public demo
 
-Full Foundry quality evaluations require credentials and are disabled for anonymous demo users.
+The recruiter entry point is the frontend:
 
-## Responsible AI
+https://ai-operations-copilot-eight.vercel.app
 
-AI output is a recommendation. A human must review it. See [docs/RESPONSIBLE_AI.md](docs/RESPONSIBLE_AI.md).
+Source: https://github.com/Adellaghmari/ai-operations-copilot
 
-## Limitations
+On 2026-10-09 the deployed frontend returned HTTP 200. API health reported `app_mode=foundry`, readiness reported `database=true`, and Foundry runs on that deployment showed the Evidence Ledger, Assurance Gates, and a recorded human decision. That record describes the deployed revision. It does not label later uncommitted work as live. The anonymous demo disables reset, knowledge mutations, and evaluation execution.
 
-- Live Foundry integration requires Adel's Azure project and model deployments.
-- Public demo will enforce daily AI-run quotas.
-- Quality signals are evidence measures, not probabilities of correctness.
-- Prompt-injection defenses reduce risk; they do not eliminate it.
+The API host, environment, and smoke checks are in [Deployment](docs/DEPLOYMENT.md).
 
-## Project status
+## Engineering boundaries
 
-See [PROJECT_STATUS.md](PROJECT_STATUS.md) and [CV_CLAIMS_MATRIX.md](CV_CLAIMS_MATRIX.md).
+- exactly three AI stages: Triage, Resolution, and Review
+- maximum one Resolution revision after `REVISE`
+- mandatory human decision ownership
+- no fabricated Foundry output, evaluation scores, customer data, or confidence
+- ticket text, uploads, and retrieved chunks are treated as untrusted content
+- Foundry Hosted Agents and Foundry visual workflows are not the runtime
+- typed helper functions exist, but they are not wired as model tool calls
+- `EvaluationCase` and `AuditEvent` database models are currently reserved and are not active product features
+
+## Repository
+
+- `frontend/` React application and browser tests
+- `backend/` API, workflow, retrieval, assurance, evaluation, and tests
+- `evals/` versioned golden dataset
+- `docs/` system design, retrieval, evaluation, responsible AI, Foundry setup, deployment, and recruiter guide
+- `docker/` local PostgreSQL, API, and frontend stack
+- `scripts/` maintenance helpers such as reindex
+- `.github/` validation workflow
+
+Start with [the recruiter guide](docs/RECRUITER_DEMO.md), then read [AI system design](docs/AI_SYSTEM_DESIGN.md) and [architecture](docs/ARCHITECTURE.md).

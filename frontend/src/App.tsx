@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { AboutPage } from "./pages/AboutPage";
 import { AiRunsPage } from "./pages/AiRunsPage";
@@ -7,6 +7,7 @@ import { EvaluationsPage } from "./pages/EvaluationsPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { NewTicketPage } from "./pages/NewTicketPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
 import { TicketsPage } from "./pages/TicketsPage";
 
@@ -24,7 +25,7 @@ export function App() {
         <Route path="evaluations" element={<EvaluationsPage />} />
         <Route path="feedback" element={<FeedbackPage />} />
         <Route path="about" element={<AboutPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   );

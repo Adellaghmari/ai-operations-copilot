@@ -1,12 +1,17 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import db_session, guest_key, settings_dep
 from app.ai.workflow.runner import SupportWorkflowRunner
+from app.api.deps import (
+    db_session,
+    enforce_public_ticket_capacity,
+    guest_key,
+    settings_dep,
+)
 from app.config import Settings
 from app.models.entities import AiRun, Customer, Ticket, TicketMessage
 from app.models.enums import HumanDecision
@@ -31,6 +36,7 @@ async def list_tickets(
     category: str | None = None,
     severity: str | None = None,
     ai_review_status: str | None = None,
+    demo_scenario: str | None = None,
     q: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -50,6 +56,9 @@ async def list_tickets(
     if ai_review_status:
         statement = statement.where(Ticket.ai_review_status == ai_review_status)
         count_statement = count_statement.where(Ticket.ai_review_status == ai_review_status)
+    if demo_scenario:
+        statement = statement.where(Ticket.demo_scenario == demo_scenario)
+        count_statement = count_statement.where(Ticket.demo_scenario == demo_scenario)
     if q:
         pattern = f"%{q}%"
         statement = statement.where(Ticket.subject.ilike(pattern) | Ticket.body.ilike(pattern))
@@ -90,7 +99,10 @@ async def create_ticket(
         ).scalar_one_or_none()
     if customer is None:
         raise HTTPException(400, "No customer is available for this ticket")
+    if settings.app_env == "production" and settings.demo_public:
+        await session.execute(text("SELECT pg_advisory_xact_lock(1246542671)"))
     count = (await session.execute(select(func.count(Ticket.id)))).scalar_one()
+    enforce_public_ticket_capacity(settings, count)
     ticket = Ticket(
         display_id=f"T-{count + 1:04d}",
         customer_id=customer.id,
@@ -155,27 +167,29 @@ async def review_run(
     run_id: UUID,
     payload: HumanReviewRequest,
     session: AsyncSession = Depends(db_session),
+    settings: Settings = Depends(settings_dep),
+    guest: str = Depends(guest_key),
 ) -> AiRunDetail:
     ticket = await session.get(Ticket, ticket_id)
     run = await session.get(AiRun, run_id, options=[selectinload(AiRun.steps)])
     if ticket is None or run is None or run.ticket_id != ticket.id:
         raise HTTPException(404, "AI run not found")
+    if run.human_decision is not None:
+        raise HTTPException(409, "AI run already has a human decision")
     try:
         HumanDecision(payload.decision)
     except ValueError as exc:
         raise HTTPException(400, "Invalid reviewer decision") from exc
     if payload.decision == HumanDecision.REGENERATE.value:
+        try:
+            await consume_demo_quota(session, settings, guest)
+        except QuotaExceededError as exc:
+            raise HTTPException(429, str(exc)) from exc
         await apply_human_review(session, run, ticket, payload)
-        runner = SupportWorkflowRunner(get_live_settings(), session)
+        runner = SupportWorkflowRunner(settings, session)
         regenerated = await runner.run(ticket, guest_feedback=payload.feedback)
         loaded = await session.get(AiRun, regenerated.id, options=[selectinload(AiRun.steps)])
         return AiRunDetail.model_validate(loaded)
     updated = await apply_human_review(session, run, ticket, payload)
     loaded = await session.get(AiRun, updated.id, options=[selectinload(AiRun.steps)])
     return AiRunDetail.model_validate(loaded)
-
-
-def get_live_settings() -> Settings:
-    from app.config import get_settings
-
-    return get_settings()

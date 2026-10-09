@@ -10,6 +10,8 @@ class HealthResponse(BaseModel):
     app_mode: str
     foundry_configured: bool
     uses_foundry: bool
+    public_demo: bool
+    administrative_mutations_enabled: bool
 
 
 class ReadyResponse(BaseModel):
@@ -59,6 +61,7 @@ class TicketOut(BaseModel):
     is_synthetic: bool
     last_ai_analysis_at: datetime | None
     ai_review_status: str | None
+    demo_scenario: str | None = None
     created_at: datetime
     updated_at: datetime
     customer: CustomerOut | None = None
@@ -136,6 +139,14 @@ class AiRunOut(BaseModel):
     error_message: str | None
     duration_ms: int | None
     was_edited: bool
+    original_resolution_draft: dict[str, Any] | None = None
+    assurance_report: dict[str, Any] | None = None
+    assurance_outcome: str | None = None
+    abstained: bool = False
+    supported_claim_count: int = 0
+    unsupported_claim_count: int = 0
+    conflict_count: int = 0
+    missing_information_count: int = 0
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -156,6 +167,13 @@ class AiRunDetail(AiRunOut):
     steps: list[AiRunStepOut] = Field(default_factory=list)
 
 
+class DemoCaseOut(BaseModel):
+    id: UUID
+    display_id: str
+    subject: str
+    demo_scenario: str
+
+
 class DashboardMetrics(BaseModel):
     open_tickets: int
     ai_assisted_tickets: int
@@ -168,6 +186,13 @@ class DashboardMetrics(BaseModel):
     knowledge_documents_indexed: int
     provider_kind: str
     foundry_live: bool
+    cases_awaiting_human_decision: int = 0
+    ai_abstentions: int = 0
+    evidence_gaps_detected: int = 0
+    potential_evidence_conflicts: int = 0
+    recommendations_revised: int = 0
+    grounded_recommendations: int = 0
+    risky_cases: list[DemoCaseOut] = Field(default_factory=list)
 
 
 class FeedbackSummary(BaseModel):

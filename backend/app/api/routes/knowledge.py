@@ -5,14 +5,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import db_session, settings_dep
 from app.ai.retrieval.service import HybridRetrievalService
+from app.api.deps import db_session, require_private_demo, settings_dep
 from app.config import Settings
 from app.models.entities import KnowledgeChunk, KnowledgeDocument
 from app.models.enums import DocumentVisibility, IngestionStatus
-from app.schemas.api import KnowledgeChunkOut, KnowledgeDocumentOut
 from app.schemas.ai import RetrievedChunk
-from app.services.ingestion import extract_text, ingest_document, sanitize_filename
+from app.schemas.api import KnowledgeChunkOut, KnowledgeDocumentOut
+from app.services.ingestion import (
+    DocumentParseError,
+    extract_text,
+    ingest_document,
+    sanitize_filename,
+)
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -71,6 +76,7 @@ async def get_chunk(chunk_id: UUID, session: AsyncSession = Depends(db_session))
 async def upload_document(
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
+    _: None = Depends(require_private_demo),
     session: AsyncSession = Depends(db_session),
     settings: Settings = Depends(settings_dep),
 ) -> KnowledgeDocumentOut:
@@ -80,7 +86,7 @@ async def upload_document(
         raise HTTPException(400, "File exceeds the upload size limit")
     try:
         text = extract_text(filename, payload)
-    except ValueError as exc:
+    except DocumentParseError as exc:
         raise HTTPException(400, str(exc)) from exc
     slug = filename.rsplit(".", 1)[0].lower()
     document = KnowledgeDocument(
@@ -108,7 +114,11 @@ async def upload_document(
 
 
 @router.delete("/{document_id}")
-async def delete_document(document_id: UUID, session: AsyncSession = Depends(db_session)) -> dict:
+async def delete_document(
+    document_id: UUID,
+    _: None = Depends(require_private_demo),
+    session: AsyncSession = Depends(db_session),
+) -> dict:
     document = await session.get(
         KnowledgeDocument, document_id, options=[selectinload(KnowledgeDocument.chunks)]
     )

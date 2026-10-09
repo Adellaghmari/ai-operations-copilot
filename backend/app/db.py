@@ -1,3 +1,9 @@
+"""Database engines.
+
+Request handlers use SQLAlchemy 2 async sessions over asyncpg.
+The sync engine exists only for Alembic and other offline schema work.
+"""
+
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import create_engine
@@ -24,6 +30,12 @@ def get_sync_session() -> Session:
 
 
 async def create_schema() -> None:
+    async with async_engine.connect() as connection:
+        autocommit_connection = await connection.execution_options(
+            isolation_level="AUTOCOMMIT"
+        )
+        await autocommit_connection.exec_driver_sql(
+            "CREATE EXTENSION IF NOT EXISTS vector"
+        )
     async with async_engine.begin() as connection:
-        await connection.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
         await connection.run_sync(Base.metadata.create_all)

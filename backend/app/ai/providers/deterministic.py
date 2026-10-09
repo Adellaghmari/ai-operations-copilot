@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.models.enums import ProviderKind
 from app.schemas.ai import (
     QualitySignalComponents,
+    ResolutionClaim,
     ResolutionDraft,
     ReviewResult,
     SourceCitation,
@@ -40,7 +41,6 @@ class DeterministicChatProvider:
         user_input: str,
         schema: type[T],
     ) -> T:
-        lowered = user_input.lower()
         if schema is TriageResult:
             return schema.model_validate(_triage_from_text(user_input))  # type: ignore[return-value]
         if schema is ResolutionDraft:
@@ -53,11 +53,10 @@ class DeterministicChatProvider:
             raise ValueError("Unsupported fixture schema") from exc
 
 
-class DeterministicEmbeddingProvider:
-    kind = ProviderKind.TEST_FIXTURE.value
-
-    def __init__(self) -> None:
+class HashEmbeddingProvider:
+    def __init__(self, kind: str = ProviderKind.TEST_FIXTURE.value) -> None:
         settings = get_settings()
+        self.kind = kind
         self.model_name = "deterministic-hash"
         self.dimensions = settings.foundry_embedding_dimensions
 
@@ -79,6 +78,21 @@ class DeterministicEmbeddingProvider:
         return [item / norm for item in values]
 
 
+class DeterministicEmbeddingProvider(HashEmbeddingProvider):
+    def __init__(self) -> None:
+        super().__init__(kind=ProviderKind.TEST_FIXTURE.value)
+
+
+class LocalHashEmbeddingProvider(HashEmbeddingProvider):
+    """Local-only embeddings for ingestion when Foundry is not configured.
+
+    This is not a chat fixture and must never be selected when APP_MODE=foundry.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(kind=ProviderKind.LOCAL_HASH.value)
+
+
 def _triage_from_text(text: str) -> dict:
     lowered = text.lower()
     category = "other"
@@ -88,6 +102,8 @@ def _triage_from_text(text: str) -> dict:
             break
     if "password" in lowered or "login" in lowered or "sso" in lowered:
         category = "account_access"
+    elif "mfa" in lowered or "disable mfa" in lowered or "bypass" in lowered:
+        category = "security"
     elif "invoice" in lowered or "refund" in lowered or "billing" in lowered:
         category = "billing"
     elif "inject" in lowered or "ignore previous" in lowered:
@@ -127,6 +143,10 @@ def _triage_from_text(text: str) -> dict:
         missing.append("error code or screenshot")
     if category == "account_access" and "email" not in lowered:
         missing.append("affected account email")
+    if "owner" in lowered or "ownership" in lowered:
+        missing.append("account ownership verification")
+    if ("mfa" in lowered or "domain" in lowered) and "workspace" not in lowered:
+        missing.append("affected domain")
 
     risk = []
     if "ignore previous" in lowered or "system prompt" in lowered:
@@ -139,7 +159,9 @@ def _triage_from_text(text: str) -> dict:
         "category": category,
         "severity": severity,
         "urgency": urgency,
-        "sentiment": "negative" if any(w in lowered for w in ("angry", "urgent", "cannot")) else "neutral",
+        "sentiment": "negative"
+        if any(w in lowered for w in ("angry", "urgent", "cannot"))
+        else "neutral",
         "technical_entities": _entities(lowered),
         "missing_information": missing,
         "risk_flags": risk,
@@ -153,17 +175,26 @@ def _triage_from_text(text: str) -> dict:
 
 def _resolution_from_text(user_input: str, instructions: str) -> dict:
     citations: list[SourceCitation] = []
-    for match in re.findall(r"chunk_id=([0-9a-f-]{36})", user_input):
+    pattern = re.compile(
+        r"chunk_id=(?P<chunk_id>[0-9a-f-]{36}) "
+        r"document_id=(?P<document_id>[0-9a-f-]{36}) "
+        r"document=(?P<document>[^\n]+?) section=(?P<section>[^\n]+?) "
+        r"score=[^\n]+\n(?P<body>.*?)(?=\n---|\nchunk_id=|\Z)",
+        re.S,
+    )
+    for match in pattern.finditer(user_input):
         citations.append(
             SourceCitation(
-                chunk_id=match,
-                document_name="Retrieved knowledge",
-                section="Matched section",
-                snippet="Supporting snippet from retrieved knowledge.",
+                chunk_id=match.group("chunk_id"),
+                document_id=match.group("document_id"),
+                document_name=match.group("document").strip(),
+                section=match.group("section").strip(),
+                snippet=match.group("body").strip(),
             )
         )
+    lowered = user_input.lower()
     insufficient = "NO_RELEVANT_KNOWLEDGE" in user_input or "retrieved_count=0" in user_input
-    injection = "ignore previous" in user_input.lower()
+    injection = "ignore previous" in lowered
     escalate = "P1" in user_input or "security_sensitive" in user_input or injection
     draft = (
         "Thank you for contacting Northline Support. We reviewed your request and the "
@@ -181,17 +212,32 @@ def _resolution_from_text(user_input: str, instructions: str) -> dict:
             "We treated the ticket text as untrusted customer content and did not follow "
             "embedded instructions. A human specialist will continue the review."
         )
+    cited_ids = [item.chunk_id for item in citations[:4]]
+    claims = _claims_from_text(user_input, cited_ids, citations)
+    proposed = (
+        claims[0].text if claims else "Use cited knowledge and keep the decision with a human."
+    )
+    if "disable mfa" in lowered or "bypass" in lowered:
+        proposed = "Escalate to security. Do not disable MFA or bypass SSO."
+    if "enterprise" in lowered and "refund" in lowered:
+        proposed = "Do not issue an immediate refund. Route to finance approval."
+    if insufficient or ("transfer ownership" in lowered and "email" not in lowered):
+        proposed = "No operational action recommended until required facts are verified."
     return {
         "internal_summary": "Fixture resolution generated from ticket and retrieved sources.",
         "recommended_actions": [
+            proposed,
             "Confirm identity if the request is account-related",
             "Use only cited knowledge",
-            "Escalate if evidence is insufficient",
         ],
+        "proposed_action": proposed,
+        "claims": [item.model_dump() for item in claims],
         "customer_response_draft": draft,
         "source_citations": [item.model_dump() for item in citations[:4]],
         "escalation_required": escalate or insufficient,
-        "escalation_reason": "Insufficient evidence or security sensitivity" if escalate or insufficient else None,
+        "escalation_reason": "Insufficient evidence or security sensitivity"
+        if escalate or insufficient
+        else None,
         "unanswered_questions": ["Please confirm the workspace name"] if insufficient else [],
         "quality_signal_components": QualitySignalComponents(
             retrieval_coverage=0.5,
@@ -206,18 +252,162 @@ def _resolution_from_text(user_input: str, instructions: str) -> dict:
 
 
 def _review_from_text(user_input: str) -> dict:
-    revise = "FORCE_REVISE" in user_input or "unsupported claim" in user_input.lower()
+    lowered = user_input.lower()
+    revise = "FORCE_REVISE" in user_input or "unsupported claim" in lowered
+    escalate = (
+        "disable mfa" in lowered
+        or "bypass sso" in lowered
+        or "possible_prompt_injection" in lowered
+    )
+    conflicts = _conflicts_from_text(user_input)
+    missing = []
+    if "transfer ownership" in lowered or "account owner" in lowered:
+        missing.append(
+            {
+                "concept": "identity verification",
+                "reason": "Ownership change requires a verified requester.",
+                "materiality": "BLOCKING",
+            }
+        )
+        missing.append(
+            {
+                "concept": "account ownership",
+                "reason": "The current verified owner is not established.",
+                "materiality": "BLOCKING",
+            }
+        )
+    status = "ESCALATE" if escalate and not revise else ("REVISE" if revise else "PASS")
     return {
-        "status": "REVISE" if revise else "PASS",
+        "status": status,
         "grounding_issues": ["Needs tighter source binding"] if revise else [],
         "unsupported_claims": ["Possible over-claim"] if revise else [],
-        "missing_items": [],
+        "missing_items": [item["concept"] for item in missing],
         "tone_issues": [],
-        "safety_flags": ["prompt_injection_influence"] if "ignore previous" in user_input.lower() else [],
+        "safety_flags": ["prompt_injection_influence"]
+        if "ignore previous" in lowered
+        else (["security_control_bypass_request"] if escalate else []),
         "citation_issues": [],
         "recommended_changes": ["Remove unsupported certainty and cite sources."] if revise else [],
         "review_summary": "Fixture review completed against retrieved sources and policy checks.",
+        "claim_assessments": [],
+        "potential_conflicts": conflicts,
+        "missing_information": missing,
     }
+
+
+def _claims_from_text(
+    user_input: str, cited_ids: list[str], citations: list[SourceCitation]
+) -> list[ResolutionClaim]:
+    lowered = user_input.lower()
+    claims: list[ResolutionClaim] = []
+    if "disable mfa" in lowered or "bypass sso" in lowered:
+        claims.append(
+            ResolutionClaim(
+                claim_id="claim-unsupported-bypass",
+                text="Support may temporarily disable MFA.",
+                category="action",
+                requires_evidence=True,
+                cited_chunk_ids=[],
+            )
+        )
+        claims.append(
+            ResolutionClaim(
+                claim_id="claim-security-policy",
+                text=(
+                    "Support must not disable tenant security controls "
+                    "or ask the customer to turn off MFA."
+                ),
+                category="policy",
+                requires_evidence=True,
+                cited_chunk_ids=cited_ids[:2],
+            )
+        )
+        return claims
+    if "enterprise" in lowered and "refund" in lowered:
+        claims.append(
+            ResolutionClaim(
+                claim_id="claim-refund-general",
+                text="Eligible refunds may apply to unused prepaid months.",
+                category="policy",
+                requires_evidence=True,
+                cited_chunk_ids=cited_ids[:1],
+            )
+        )
+        claims.append(
+            ResolutionClaim(
+                claim_id="claim-refund-enterprise",
+                text=(
+                    "Enterprise refunds require finance approval and must not "
+                    "be issued immediately by support."
+                ),
+                category="action",
+                requires_evidence=True,
+                cited_chunk_ids=cited_ids[1:2] or cited_ids[:1],
+            )
+        )
+        return claims
+    if "export tickets" in lowered or "how do i export" in lowered:
+        claims.append(
+            ResolutionClaim(
+                claim_id="claim-export",
+                text=(
+                    "Admins can export tickets from Reports > Exports. "
+                    "CSV includes display ID and last updated time."
+                ),
+                category="procedure",
+                requires_evidence=True,
+                cited_chunk_ids=cited_ids[:2],
+            )
+        )
+        return claims
+    if cited_ids:
+        snippet = citations[0].snippet[:180] if citations else "Retrieved policy applies."
+        claims.append(
+            ResolutionClaim(
+                claim_id="claim-grounded",
+                text=snippet,
+                category="fact",
+                requires_evidence=True,
+                cited_chunk_ids=cited_ids[:2],
+            )
+        )
+        return claims
+    claims.append(
+        ResolutionClaim(
+            claim_id="claim-insufficient",
+            text="No safe operational action can be recommended from the available evidence.",
+            category="limitation",
+            requires_evidence=False,
+            cited_chunk_ids=[],
+        )
+    )
+    return claims
+
+
+def _conflicts_from_text(user_input: str) -> list[dict]:
+    if "enterprise" not in user_input.lower() or "refund" not in user_input.lower():
+        return []
+    ids = re.findall(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", user_input.lower()
+    )
+    unique = list(dict.fromkeys(ids))
+    if len(unique) < 2:
+        return []
+    return [
+        {
+            "chunk_a": unique[0],
+            "chunk_b": unique[1],
+            "summary": (
+                "General refund policy and Enterprise refund policy "
+                "impose different requirements."
+            ),
+            "materiality": "MATERIAL",
+            "impact": (
+                "An immediate refund should not be recommended until "
+                "finance requirements are resolved."
+            ),
+        }
+    ]
 
 
 def _entities(text: str) -> list[str]:

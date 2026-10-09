@@ -4,6 +4,7 @@ from sqlalchemy import Select, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.ai.observability import get_tracer, set_safe_span_attributes
 from app.ai.providers.factory import get_embedding_provider
 from app.ai.retrieval.hybrid import reciprocal_rank_fusion
 from app.config import Settings
@@ -22,16 +23,29 @@ class HybridRetrievalService:
         query: str,
         exclude_evaluation_only: bool = True,
     ) -> list[RetrievedChunk]:
-        vector = (await self.embeddings.embed([query]))[0]
-        vector_hits = await self._vector_search(vector, exclude_evaluation_only)
-        lexical_hits = await self._lexical_search(query, exclude_evaluation_only)
-        return reciprocal_rank_fusion(
-            vector_hits,
-            lexical_hits,
-            k=self.settings.retrieval_rrf_k,
-            top_k=self.settings.retrieval_top_k,
-            min_score=self.settings.retrieval_min_score,
-        )
+        tracer = get_tracer()
+        with tracer.start_as_current_span("ai.retrieval.embedding") as span:
+            set_safe_span_attributes(
+                span,
+                **{"ai.embedding_model": self.settings.foundry_embedding_model},
+            )
+            vector = (await self.embeddings.embed([query]))[0]
+        with tracer.start_as_current_span("ai.retrieval.vector") as span:
+            vector_hits = await self._vector_search(vector, exclude_evaluation_only)
+            set_safe_span_attributes(span, **{"ai.retrieval_candidate_count": len(vector_hits)})
+        with tracer.start_as_current_span("ai.retrieval.lexical") as span:
+            lexical_hits = await self._lexical_search(query, exclude_evaluation_only)
+            set_safe_span_attributes(span, **{"ai.retrieval_candidate_count": len(lexical_hits)})
+        with tracer.start_as_current_span("ai.retrieval.rrf") as span:
+            fused = reciprocal_rank_fusion(
+                vector_hits,
+                lexical_hits,
+                k=self.settings.retrieval_rrf_k,
+                top_k=self.settings.retrieval_top_k,
+                min_score=self.settings.retrieval_min_score,
+            )
+            set_safe_span_attributes(span, **{"ai.retrieved_chunk_count": len(fused)})
+            return fused
 
     async def _vector_search(
         self, vector: list[float], exclude_evaluation_only: bool

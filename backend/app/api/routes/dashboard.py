@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import db_session, settings_dep
 from app.config import Settings
 from app.models.entities import AiFeedback, AiRun, EvaluationRun, KnowledgeDocument, Ticket
-from app.models.enums import AiRunStatus, HumanDecision, IngestionStatus
-from app.schemas.api import DashboardMetrics, FeedbackSummary
+from app.models.enums import HumanDecision, IngestionStatus
+from app.schemas.api import DashboardMetrics, DemoCaseOut, FeedbackSummary
 
 router = APIRouter(tags=["analytics"])
 
@@ -20,7 +20,9 @@ async def dashboard(
         await session.execute(select(func.count(Ticket.id)).where(Ticket.status == "open"))
     ).scalar_one()
     ai_assisted = (
-        await session.execute(select(func.count(Ticket.id)).where(Ticket.last_ai_analysis_at.is_not(None)))
+        await session.execute(
+            select(func.count(Ticket.id)).where(Ticket.last_ai_analysis_at.is_not(None))
+        )
     ).scalar_one()
     awaiting = (
         await session.execute(
@@ -29,9 +31,9 @@ async def dashboard(
     ).scalar_one()
     decided = (
         await session.execute(
-            select(AiRun.human_decision, func.count(AiRun.id)).where(
-                AiRun.human_decision.is_not(None)
-            ).group_by(AiRun.human_decision)
+            select(AiRun.human_decision, func.count(AiRun.id))
+            .where(AiRun.human_decision.is_not(None))
+            .group_by(AiRun.human_decision)
         )
     ).all()
     counts = {key: value for key, value in decided}
@@ -42,7 +44,9 @@ async def dashboard(
     edited = counts.get(HumanDecision.EDIT_AND_APPROVE.value, 0)
     rejected = counts.get(HumanDecision.REJECT.value, 0)
     latency = (
-        await session.execute(select(func.avg(AiRun.duration_ms)).where(AiRun.duration_ms.is_not(None)))
+        await session.execute(
+            select(func.avg(AiRun.duration_ms)).where(AiRun.duration_ms.is_not(None))
+        )
     ).scalar()
     latest_eval = (
         await session.execute(
@@ -61,6 +65,36 @@ async def dashboard(
             )
         )
     ).scalar_one()
+    abstentions = (
+        await session.execute(select(func.count(AiRun.id)).where(AiRun.abstained.is_(True)))
+    ).scalar_one()
+    gaps = (
+        await session.execute(
+            select(func.count(AiRun.id)).where(AiRun.missing_information_count > 0)
+        )
+    ).scalar_one()
+    conflicts = (
+        await session.execute(select(func.count(AiRun.id)).where(AiRun.conflict_count > 0))
+    ).scalar_one()
+    revised = (
+        await session.execute(select(func.count(AiRun.id)).where(AiRun.revision_count > 0))
+    ).scalar_one()
+    grounded = (
+        await session.execute(
+            select(func.count(AiRun.id)).where(AiRun.assurance_outcome == "READY_FOR_HUMAN_REVIEW")
+        )
+    ).scalar_one()
+    risky_rows = (
+        (
+            await session.execute(
+                select(Ticket)
+                .where(Ticket.demo_scenario.is_not(None))
+                .order_by(Ticket.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
     return DashboardMetrics(
         open_tickets=open_tickets,
         ai_assisted_tickets=ai_assisted,
@@ -73,13 +107,30 @@ async def dashboard(
         knowledge_documents_indexed=indexed,
         provider_kind=settings.app_mode,
         foundry_live=settings.uses_foundry,
+        cases_awaiting_human_decision=awaiting,
+        ai_abstentions=abstentions,
+        evidence_gaps_detected=gaps,
+        potential_evidence_conflicts=conflicts,
+        recommendations_revised=revised,
+        grounded_recommendations=grounded,
+        risky_cases=[
+            DemoCaseOut(
+                id=row.id,
+                display_id=row.display_id,
+                subject=row.subject,
+                demo_scenario=row.demo_scenario or "",
+            )
+            for row in risky_rows
+        ],
     )
 
 
 @router.get("/feedback", response_model=FeedbackSummary)
 async def feedback(session: AsyncSession = Depends(db_session)) -> FeedbackSummary:
     rows = (
-        await session.execute(select(AiFeedback.label, func.count(AiFeedback.id)).group_by(AiFeedback.label))
+        await session.execute(
+            select(AiFeedback.label, func.count(AiFeedback.id)).group_by(AiFeedback.label)
+        )
     ).all()
     by_label = {key: value for key, value in rows}
     total = sum(by_label.values())
@@ -92,9 +143,7 @@ async def feedback(session: AsyncSession = Depends(db_session)) -> FeedbackSumma
     ).all()
     counts = {key: value for key, value in decided}
     total_decided = sum(counts.values())
-    avg_edit = (
-        await session.execute(select(func.avg(AiFeedback.edit_distance_ratio)))
-    ).scalar()
+    avg_edit = (await session.execute(select(func.avg(AiFeedback.edit_distance_ratio)))).scalar()
     return FeedbackSummary(
         total=total,
         by_label=by_label,

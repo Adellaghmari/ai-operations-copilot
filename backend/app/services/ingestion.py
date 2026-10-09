@@ -1,9 +1,12 @@
 import re
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from uuid import UUID
 
 from pypdf import PdfReader
+from pypdf.errors import PdfReadError
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.providers.factory import get_embedding_provider
@@ -13,8 +16,11 @@ from app.config import Settings
 from app.models.entities import KnowledgeChunk, KnowledgeDocument
 from app.models.enums import IngestionStatus
 
-
 ALLOWED_SUFFIXES = {".md", ".txt", ".pdf"}
+
+
+class DocumentParseError(ValueError):
+    """Raised when a knowledge file cannot be turned into usable text."""
 
 
 def sanitize_filename(name: str) -> str:
@@ -28,13 +34,38 @@ def sanitize_filename(name: str) -> str:
 def extract_text(filename: str, payload: bytes) -> str:
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
-        raise ValueError("Unsupported file type. Upload Markdown, TXT, or PDF.")
+        raise DocumentParseError("Unsupported file type. Upload Markdown, TXT, or PDF.")
     if suffix == ".pdf":
-        from io import BytesIO
+        return _extract_pdf_text(payload)
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise DocumentParseError("Text file is not valid UTF-8.") from exc
+    if not text.strip():
+        raise DocumentParseError("The uploaded text file is empty.")
+    return text
 
+
+def _extract_pdf_text(payload: bytes) -> str:
+    try:
         reader = PdfReader(BytesIO(payload))
-        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
-    return payload.decode("utf-8")
+    except PdfReadError as exc:
+        raise DocumentParseError(f"PDF could not be parsed: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise DocumentParseError(f"PDF could not be opened: {exc}") from exc
+
+    pages: list[str] = []
+    for index, page in enumerate(reader.pages, start=1):
+        try:
+            pages.append(page.extract_text() or "")
+        except Exception as exc:  # noqa: BLE001
+            raise DocumentParseError(f"PDF page {index} could not be read: {exc}") from exc
+    text = "\n\n".join(pages).strip()
+    if not text:
+        raise DocumentParseError(
+            "PDF contained no extractable text. Scanned or image-only PDFs are not indexed."
+        )
+    return text
 
 
 async def ingest_document(
@@ -50,14 +81,25 @@ async def ingest_document(
     ):
         raise ValueError("Embedding dimensions do not match the configured model. Reindex required.")
     document.ingestion_status = IngestionStatus.PROCESSING.value
-    document.source_text = raw_text
     await session.flush()
 
-    document.chunks.clear()
+    if not raw_text or not raw_text.strip():
+        document.ingestion_status = IngestionStatus.FAILED.value
+        document.source_text = ""
+        await session.commit()
+        raise DocumentParseError("No extractable text. The document was not indexed.")
+
+    document.source_text = raw_text
+    await session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document.id))
     await session.flush()
 
     pieces = split_into_chunks(raw_text)
-    vectors = await embeddings.embed([body for _, body in pieces]) if pieces else []
+    if not pieces:
+        document.ingestion_status = IngestionStatus.FAILED.value
+        await session.commit()
+        raise DocumentParseError("Text could not be split into usable chunks. The document was not indexed.")
+
+    vectors = await embeddings.embed([body for _, body in pieces])
     for index, ((section, body), vector) in enumerate(zip(pieces, vectors, strict=True)):
         chunk = KnowledgeChunk(
             document_id=document.id,

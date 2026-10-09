@@ -4,7 +4,7 @@ Evaluation is a first-class product capability. Only completed real runs are per
 
 ## Golden dataset
 
-`evals/golden_cases.jsonl` contains at least 40 inspectable synthetic tickets.
+`evals/golden_cases.jsonl` contains 44 inspectable synthetic tickets (`golden-v2`).
 
 Coverage includes:
 
@@ -19,30 +19,32 @@ Coverage includes:
 
 Where objectively possible, each case includes expected category, severity range, escalation, relevant document IDs, required facts, and forbidden claims.
 
-## Deterministic metrics
+## Current Evaluation Lab path
 
-These run locally without a paid judge model:
+The application Evaluation Lab runs the deterministic fixture provider over all 44 cases. Retrieval is intentionally empty in this path. The UI therefore presents retrieval recall and citation coverage as **Not measured**, even though the stored evaluation record keeps schema-compatible metric fields.
 
 | Metric | Meaning |
 |---|---|
-| Classification accuracy | Predicted category equals expected category |
-| Severity accuracy | Predicted severity is inside the expected range |
-| Retrieval recall at K | Expected document IDs appear in the top-K retrieved set |
-| Citation coverage | Cited chunk IDs exist and belong to retrieved or expected sources |
-| Escalation accuracy | Escalation decision matches the expected label |
-| Structured output validity | Agent payloads pass Pydantic validation |
+| Classification check | Fixture category equals the expected category |
+| Severity check | Fixture severity is inside the expected range |
+| Escalation check | Fixture escalation decision matches the expected label |
+| Structured output validity | Typed fixture output passes Pydantic validation by construction |
+| Retrieval recall at K | Not measured in the current lab path |
+| Citation coverage | Not measured in the current lab path |
+
+The assurance engine, retrieval, citations, replay, and revision bounds have separate unit and browser coverage. Their tests are not aggregated into an Evaluation Lab score.
 
 ## Foundry quality metrics
 
-When Foundry credentials are available, the application can call the current Agent Framework `FoundryEvals` helper. That helper is **experimental** in the current `agent-framework-foundry` package. Deterministic metrics remain the generally available default. Do not display Foundry quality scores until a real run completes.
+Do not invent Foundry Evals results. FoundryEvals remains unused on the public demo unless a real run is later recorded.
 
-These metrics are not shown until a real run completes.
+Unit tests in `backend/tests/test_assurance_engine.py` cover supported claims, unsupported claims, partial support, invalid citation rejection, missing information abstention, potential conflicts, revision delta, packet assembly, and Decision Replay.
 
 Public demo users cannot trigger an expensive full evaluation.
 
-## Quality signal shown in the product
+## Stored quality signal
 
-Label: **AI quality signal**
+The backend computes a component based value labelled **AI quality signal** and stores it with an AI run. The current interface does not display the numeric score.
 
 Not a confidence percentage.
 
@@ -56,14 +58,15 @@ signal = clip(
 )
 ```
 
-Each term is documented in code (`backend/app/ai/quality.py`) and visible in the AI workspace.
+Each term is documented in `backend/app/ai/quality.py`. The value is an evidence and process summary, not calibrated correctness.
 
 ## Comparison
 
-The Evaluation Lab stores dataset version, prompt versions, model deployment, and metric snapshots so two runs can be compared.
+The Evaluation Lab stores dataset version, prompt versions, provider, model label, case results, and metric snapshots. The current interface lets a user select stored runs and inspect case outcomes. It does not present a statistical benchmark comparison.
 
 ## Limitations
 
 - Deterministic metrics cannot judge prose quality.
 - LLM-as-judge metrics vary by judge model and cost money.
 - A passing score does not mean the recommendation is operationally correct.
+- This project does not invent evaluation numbers for the live demo. FoundryEvals remains unused on the public site.

@@ -1,6 +1,6 @@
 # Evaluations
 
-Golden dataset: `golden_cases.jsonl` (dataset version `golden-v1`).
+Golden dataset: `golden_cases.jsonl` (dataset version `golden-v2`, 44 inspectable synthetic cases).
 
 Generate or refresh the file:
 

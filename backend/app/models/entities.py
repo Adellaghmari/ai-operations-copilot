@@ -51,6 +51,7 @@ class Ticket(Base, TimestampMixin):
     is_synthetic: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_ai_analysis_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ai_review_status: Mapped[str | None] = mapped_column(String(40))
+    demo_scenario: Mapped[str | None] = mapped_column(String(80))
 
     customer: Mapped[Customer] = relationship(back_populates="tickets")
     messages: Mapped[list["TicketMessage"]] = relationship(
@@ -63,6 +64,7 @@ class Ticket(Base, TimestampMixin):
         Index("ix_tickets_category", "category"),
         Index("ix_tickets_severity", "severity"),
         Index("ix_tickets_ai_review_status", "ai_review_status"),
+        Index("ix_tickets_demo_scenario", "demo_scenario"),
     )
 
 
@@ -159,6 +161,14 @@ class AiRun(Base, TimestampMixin):
     error_message: Mapped[str | None] = mapped_column(Text)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     was_edited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    original_resolution_draft: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    assurance_report: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    assurance_outcome: Mapped[str | None] = mapped_column(String(60))
+    abstained: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    supported_claim_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    unsupported_claim_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    conflict_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    missing_information_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     ticket: Mapped[Ticket] = relationship(back_populates="ai_runs")
     steps: Mapped[list["AiRunStep"]] = relationship(
@@ -166,7 +176,11 @@ class AiRun(Base, TimestampMixin):
     )
     feedback: Mapped[list["AiFeedback"]] = relationship(back_populates="ai_run")
 
-    __table_args__ = (Index("ix_ai_runs_ticket_id", "ticket_id"),)
+    __table_args__ = (
+        Index("ix_ai_runs_ticket_id", "ticket_id"),
+        Index("ix_ai_runs_assurance_outcome", "assurance_outcome"),
+        Index("ix_ai_runs_abstained", "abstained"),
+    )
 
 
 class AiRunStep(Base, TimestampMixin):
@@ -233,7 +247,9 @@ class EvaluationResult(Base, TimestampMixin):
     __tablename__ = "evaluation_results"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    evaluation_run_id: Mapped[UUID] = mapped_column(ForeignKey("evaluation_runs.id"), nullable=False)
+    evaluation_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("evaluation_runs.id"), nullable=False
+    )
     case_key: Mapped[str] = mapped_column(String(80), nullable=False)
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
     metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
