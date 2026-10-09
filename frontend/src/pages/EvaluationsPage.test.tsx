@@ -88,6 +88,20 @@ describe("EvaluationsPage", () => {
     expect(screen.queryByRole("button", { name: "Run fixture evaluation" })).not.toBeInTheDocument();
   });
 
+  it("opens a dataset case and shows the stored result for that case", async () => {
+    const user = userEvent.setup();
+    ({ restore } = installMockApi(routes()));
+    renderPage(<EvaluationsPage />, { path: "/evaluations" });
+    await screen.findByTestId("eval-run-detail");
+    await user.click(screen.getByRole("button", { name: /SSO login failure/ }));
+    const detail = await screen.findByTestId("eval-case-detail");
+    expect(within(detail).getByText("SSO login failure")).toBeInTheDocument();
+    expect(within(detail).getByText("access-sso")).toBeInTheDocument();
+    expect(within(detail).getByText("golden-v2")).toBeInTheDocument();
+    expect(await within(detail).findByText("Passed")).toBeInTheDocument();
+    expect(within(detail).getByText("No failure reason is stored for this case.")).toBeInTheDocument();
+  });
+
   it("uses no dash characters in visible copy", async () => {
     ({ restore } = installMockApi(routes()));
     renderPage(<EvaluationsPage />, { path: "/evaluations" });

@@ -73,6 +73,7 @@ export type TicketFilters = {
   category?: string;
   severity?: string;
   demo_scenario?: string;
+  ai_review_status?: string;
   page?: number;
   page_size?: number;
 };
@@ -87,6 +88,17 @@ export function ticketParams(filters: TicketFilters): URLSearchParams {
 
 export const api = {
   health: () => request<Health>("/api/health"),
+  ready: async (): Promise<Ready> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/ready`, { credentials: "include" });
+      const data = (await response.json()) as Ready;
+      if (typeof data.database === "boolean") return data;
+      throw new ApiError(response.status, "The readiness endpoint did not return a database flag.");
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(0, "The API could not be reached.", error instanceof Error ? error.message : null);
+    }
+  },
   dashboard: () => request<Dashboard>("/api/dashboard"),
   tickets: (params: URLSearchParams) => request<Page<Ticket>>(`/api/tickets?${params}`),
   ticket: (id: string) => request<TicketDetail>(`/api/tickets/${id}`),
@@ -139,6 +151,11 @@ export type Health = {
   uses_foundry: boolean;
   public_demo?: boolean;
   administrative_mutations_enabled?: boolean;
+};
+
+export type Ready = {
+  status: string;
+  database: boolean;
 };
 
 export type Dashboard = {

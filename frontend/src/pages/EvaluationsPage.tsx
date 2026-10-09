@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import type { EvalCase, EvalRun } from "../lib/api";
+import type { EvalCase, EvalResult, EvalRun } from "../lib/api";
 import { describeError } from "../lib/errors";
 import { describeProvider } from "../lib/presentation";
 import { NOT_AVAILABLE, formatDate, humanize } from "../lib/utils";
@@ -239,8 +240,81 @@ function CaseResults({ runId, cases }: { runId: string; cases: EvalCase[] | unde
   );
 }
 
+function CaseDetail({
+  item,
+  result,
+  resultsReady,
+  runSelected,
+}: {
+  item: EvalCase | null;
+  result: EvalResult | undefined;
+  resultsReady: boolean;
+  runSelected: boolean;
+}) {
+  if (!item) {
+    return (
+      <Card data-testid="eval-case-detail">
+        <h3 className="text-base font-semibold text-ink">Case detail</h3>
+        <p className="mt-2 text-sm leading-6 text-muted">
+          Select a golden case to read its expected category, severity, and escalation. If the selected evaluation
+          run stored a result for that case, the stored pass or fail appears here. This panel does not invent a model
+          explanation.
+        </p>
+      </Card>
+    );
+  }
+  return (
+    <Card data-testid="eval-case-detail" className="space-y-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-violet">Dataset case</p>
+        <h3 className="mt-1 text-base font-semibold text-ink">{item.title}</h3>
+      </div>
+      <dl className="space-y-2 text-sm">
+        <div>
+          <dt className="text-xs text-muted">Case key</dt>
+          <dd className="m-0 font-medium">
+            <code>{item.case_key}</code>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted">Dataset</dt>
+          <dd className="m-0 font-medium">
+            <code>golden-v2</code>
+          </dd>
+        </div>
+        {expectedSummary(item).map((line) => (
+          <div key={line}>
+            <dt className="text-xs text-muted">Expectation</dt>
+            <dd className="m-0 font-medium">{line}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="border-t border-line pt-3">
+        <h4 className="text-sm font-semibold text-ink">Stored evaluation result</h4>
+        {!runSelected ? (
+          <p className="mt-1 text-sm text-muted">No evaluation run is selected, so only the dataset expectation is shown.</p>
+        ) : !resultsReady ? (
+          <p className="mt-1 text-sm text-muted">Stored results for the selected run are still loading.</p>
+        ) : result ? (
+          <div className="mt-2 space-y-2">
+            <Badge tone={result.passed ? "good" : "bad"}>{result.passed ? "Passed" : "Failed"}</Badge>
+            <p className="text-sm text-muted">
+              {result.failure_reason
+                ? `Failure reason: ${result.failure_reason}`
+                : "No failure reason is stored for this case."}
+            </p>
+          </div>
+        ) : (
+          <p className="mt-1 text-sm text-muted">No stored evaluation result is linked to this case in the selected run.</p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 export function EvaluationsPage() {
   const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const cases = useQuery({ queryKey: ["eval-cases"], queryFn: api.evalCases });
   const runs = useQuery({ queryKey: ["eval-runs"], queryFn: api.evalRuns });
@@ -256,11 +330,17 @@ export function EvaluationsPage() {
   const administrativeMutationsEnabled =
     health.data?.administrative_mutations_enabled !== false;
   const selectedRun = runs.data?.find((run) => run.id === (picked ?? runs.data?.[0]?.id));
+  const selectedCaseKey = params.get("case");
+  const caseResults = useQuery({
+    queryKey: ["eval-results", selectedRun?.id ?? "none"],
+    queryFn: () => api.evalResults(selectedRun!.id),
+    enabled: Boolean(selectedRun),
+  });
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Knowledge and AI"
+        eyebrow="Knowledge and quality"
         title="Evaluation lab"
         description="A regression check over a golden dataset. Read the scope notes before you read any number."
         actions={
@@ -307,6 +387,13 @@ export function EvaluationsPage() {
           </li>
           <li>The numbers are counts of cases. There is no confidence or quality percentage.</li>
         </ul>
+        <p className="mt-3 text-sm text-amber-100">
+          For how agents, application code, and humans are split, see{" "}
+          <Link className="underline" to="/architecture">
+            Architecture
+          </Link>
+          .
+        </p>
       </Card>
 
       <section aria-labelledby="dataset-heading" className="space-y-2">
@@ -320,26 +407,50 @@ export function EvaluationsPage() {
           isEmpty={(items) => items.length === 0}
           empty={<EmptyState title="The golden dataset is empty" body="The API returned no golden cases." />}
         >
-          {(items) => (
-            <Card>
-              <p className="text-sm text-ink-soft" data-testid="eval-case-count">
-                {items.length} golden cases, dataset <code>golden-v2</code>. Every case is a synthetic ticket with an
-                expected category, severity range, and escalation flag.
-              </p>
-              <div className="mt-3">
-                <Disclosure title="Browse the cases" headingLevel={3}>
-                  <ul className="m-0 grid list-none gap-1 p-0 sm:grid-cols-2">
-                    {items.map((item) => (
-                      <li key={item.case_key} className="text-sm">
-                        <span className="font-medium">{item.title}</span>
-                        <span className="block text-xs text-muted">{expectedSummary(item).join(", ")}</span>
-                      </li>
-                    ))}
+          {(items) => {
+            const selectedCase = items.find((item) => item.case_key === selectedCaseKey) ?? null;
+            const storedResult = caseResults.data?.find((item) => item.case_key === selectedCase?.case_key);
+            return (
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)]">
+                <Card>
+                  <p className="text-sm text-ink-soft" data-testid="eval-case-count">
+                    {items.length} golden cases, dataset <code>golden-v2</code>. Every case is a synthetic ticket with an
+                    expected category, severity range, and escalation flag. Select a case to inspect it.
+                  </p>
+                  <ul className="m-0 mt-3 grid list-none gap-2 p-0 sm:grid-cols-2">
+                    {items.map((item) => {
+                      const active = item.case_key === selectedCase?.case_key;
+                      return (
+                        <li key={item.case_key}>
+                          <button
+                            type="button"
+                            aria-pressed={active}
+                            className={`w-full rounded-lg border px-3 py-2 text-left text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime ${
+                              active ? "border-lime bg-lime/10" : "border-line bg-surface hover:border-violet/40"
+                            }`}
+                            onClick={() => {
+                              const next = new URLSearchParams(params);
+                              next.set("case", item.case_key);
+                              setParams(next, { replace: true });
+                            }}
+                          >
+                            <span className="block font-semibold">{item.title}</span>
+                            <span className="mt-1 block text-xs text-muted">{expectedSummary(item).join(", ")}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
-                </Disclosure>
+                </Card>
+                <CaseDetail
+                  item={selectedCase}
+                  result={storedResult}
+                  resultsReady={caseResults.isSuccess}
+                  runSelected={Boolean(selectedRun)}
+                />
               </div>
-            </Card>
-          )}
+            );
+          }}
         </QueryState>
       </section>
 

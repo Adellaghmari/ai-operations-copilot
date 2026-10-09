@@ -23,6 +23,13 @@ function renderDetail() {
   return renderPage(<TicketDetailPage />, { path: "/tickets/:ticketId", entry: `/tickets/${TICKET.id}` });
 }
 
+function renderGuidedDetail() {
+  return renderPage(<TicketDetailPage />, {
+    path: "/tickets/:ticketId",
+    entry: `/tickets/${TICKET.id}?guide=risky`,
+  });
+}
+
 describe("TicketDetailPage", () => {
   let restore: () => void = () => undefined;
   afterEach(() => restore());
@@ -80,6 +87,8 @@ describe("TicketDetailPage", () => {
     const ledger = screen.getByTestId("evidence-ledger");
     expect(within(ledger).getByText("Supported")).toBeInTheDocument();
     expect(within(ledger).getByText("Unsupported")).toBeInTheDocument();
+    await user.click(within(ledger).getAllByRole("button", { name: "Inspect provenance" })[0]);
+    expect(screen.getByTestId("ledger-provenance-claim-1")).toHaveTextContent("document_id");
     await user.click(within(ledger).getByTestId("ledger-chunk-chunk-1"));
     const snippet = await screen.findByTestId("citation-snippet");
     expect(snippet).toHaveTextContent("document_id");
@@ -127,6 +136,37 @@ describe("TicketDetailPage", () => {
     expect(await screen.findByText(/No AI analysis exists for this ticket yet/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run AI analysis" })).toBeEnabled();
     expect(screen.queryByTestId("assurance-gates")).not.toBeInTheDocument();
+  });
+
+  it("does not show the recruiter walkthrough on an ordinary ticket visit", async () => {
+    ({ restore } = installMockApi(routesFor(RUN)));
+    renderDetail();
+    await screen.findByRole("heading", { name: TICKET.subject });
+    expect(screen.queryByTestId("risky-guide")).not.toBeInTheDocument();
+  });
+
+  it("opens guided review from URL state and moves to a real section", async () => {
+    const user = userEvent.setup();
+    ({ restore } = installMockApi(routesFor(RUN)));
+    renderGuidedDetail();
+    const guide = await screen.findByTestId("risky-guide");
+    expect(guide).toHaveTextContent("What to do on this risky case");
+    expect(await screen.findByTestId("recommended-decision-label")).toHaveTextContent("Next recommended action");
+    expect(screen.getByTestId("next-recommended-action")).toHaveTextContent("Make the human decision");
+    await user.click(screen.getByTestId("guide-step-evidence"));
+    expect(document.getElementById("evidence")).toHaveFocus();
+    await user.click(screen.getByTestId("hide-risky-guide"));
+    expect(screen.getByTestId("show-risky-guide")).toBeInTheDocument();
+    await user.click(screen.getByTestId("show-risky-guide"));
+    expect(screen.getByTestId("guide-step-understand")).toBeInTheDocument();
+  });
+
+  it("recommends the real Run AI analysis control when no run exists", async () => {
+    ({ restore } = installMockApi(routesFor(null)));
+    renderGuidedDetail();
+    expect(await screen.findByTestId("next-recommended-action")).toHaveTextContent("Run the AI analysis");
+    expect(screen.getByTestId("recommended-run-label")).toHaveTextContent("Next recommended action");
+    expect(screen.getByRole("button", { name: "Run AI analysis" })).toBeEnabled();
   });
 
   it("shows an error with retry, not an empty page, when the ticket cannot load", async () => {

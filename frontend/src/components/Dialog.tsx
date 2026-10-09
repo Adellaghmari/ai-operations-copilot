@@ -18,8 +18,10 @@ type DialogProps = {
   onClose: () => void;
   title: string;
   description?: string;
-  /** `modal` is centred. `drawer` slides from the right and fills the height. */
+  /** `modal` is centred. `drawer` fills the height from `drawerSide`. */
   variant?: "modal" | "drawer";
+  /** Drawers default to the right. Mobile product navigation uses `start`. */
+  drawerSide?: "start" | "end";
   children: ReactNode;
   footer?: ReactNode;
   testId?: string;
@@ -46,6 +48,7 @@ export function Dialog({
   title,
   description,
   variant = "modal",
+  drawerSide = "end",
   children,
   footer,
   testId,
@@ -117,7 +120,11 @@ export function Dialog({
     <div
       className={cn(
         "dialog-backdrop fixed inset-0 z-50 flex bg-black/70 motion-safe:animate-[fade-in_150ms_ease-out]",
-        variant === "drawer" ? "justify-end" : "items-center justify-center p-3 sm:p-6",
+        variant === "drawer"
+          ? drawerSide === "start"
+            ? "justify-start"
+            : "justify-end"
+          : "items-center justify-center p-3 sm:p-6",
       )}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onCloseRef.current();
@@ -135,7 +142,12 @@ export function Dialog({
         className={cn(
           "dialog-panel flex flex-col bg-surface shadow-xl outline-none",
           variant === "drawer"
-            ? "h-full w-full max-w-xl motion-safe:animate-[slide-in_180ms_ease-out]"
+            ? cn(
+                "h-full w-full max-w-xl",
+                drawerSide === "start"
+                  ? "motion-safe:animate-[slide-in-start_180ms_ease-out]"
+                  : "motion-safe:animate-[slide-in_180ms_ease-out]",
+              )
             : "max-h-full w-full max-w-3xl rounded-xl",
         )}
       >

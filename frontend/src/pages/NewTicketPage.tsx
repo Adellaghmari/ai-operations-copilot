@@ -53,12 +53,13 @@ export function NewTicketPage() {
   const canSubmit = valid && customersReady && !create.isPending;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5">
+    <div className="space-y-5">
       <PageHeader
         eyebrow="Workspace"
         title="New ticket"
         description="Create a ticket, then open it to run an AI analysis. Nothing is sent to the customer."
       />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)]">
       <Card className="space-y-4">
         <form
           noValidate
@@ -160,6 +161,31 @@ export function NewTicketPage() {
           </div>
         </form>
       </Card>
+      <aside className="space-y-3 lg:sticky lg:top-24">
+        <Card className="border-t-2 border-t-violet">
+          <h2 className="text-sm font-semibold text-ink">What happens next</h2>
+          <ol className="m-0 mt-2 list-decimal space-y-2 pl-4 text-sm leading-6 text-muted">
+            <li>The ticket is stored as a synthetic demo record.</li>
+            <li>You run the workflow: Triage, retrieval, Resolution, Review, then assurance gates.</li>
+            <li>A human decides. The AI never sends a customer message.</li>
+          </ol>
+        </Card>
+        <Card>
+          <h2 className="text-sm font-semibold text-ink">Untrusted input</h2>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            Ticket text is treated as data to analyse, never as instructions to the model. Humans remain in control of
+            every outbound decision.
+          </p>
+        </Card>
+        <Card>
+          <h2 className="text-sm font-semibold text-ink">Human control</h2>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            Creating a ticket does not start an analysis. You choose when to run it, and you choose whether anything is
+            approved.
+          </p>
+        </Card>
+      </aside>
+      </div>
     </div>
   );
 }

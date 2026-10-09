@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { describeError } from "../lib/errors";
 import {
@@ -10,8 +10,13 @@ import {
   humanDecisionLabel,
   ticketStatusTone,
 } from "../lib/presentation";
-import { formatModelLabel, formatOutcome, humanize } from "../lib/utils";
-import { Badge, Button, Card, DegradedNotice, ErrorState, LoadingState } from "../components/ui";
+import { cn, formatModelLabel, formatOutcome, humanize } from "../lib/utils";
+import { Badge, Button, Card, DegradedNotice, ErrorState, LoadingState, buttonClasses } from "../components/ui";
+import {
+  analysisSucceeded,
+  nextRecommendedAction,
+  RiskyGuide,
+} from "./ticket/RiskyGuide";
 import { AssuranceSection } from "./ticket/AssuranceSection";
 import { DecisionPacketDialog } from "./ticket/DecisionPacketDialog";
 import { DecisionSection } from "./ticket/DecisionSection";
@@ -34,6 +39,8 @@ const FAILURE_STATUSES = new Set(["failed", "foundry_unavailable", "quota_exceed
 export function TicketDetailPage() {
   const { ticketId } = useParams();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const guideMode = searchParams.get("guide") === "risky";
   const queryClient = useQueryClient();
   const [showPacket, setShowPacket] = useState(false);
   const [lastDecision, setLastDecision] = useState<string | null>(null);
@@ -84,6 +91,20 @@ export function TicketDetailPage() {
     },
   });
 
+  useEffect(() => {
+    const id = location.hash.replace("#", "");
+    if (!id) return;
+    const element = document.getElementById(id);
+    if (!element) return;
+    element.scrollIntoView({
+      behavior:
+        typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+      block: "start",
+    });
+  }, [location.hash, ticket.data?.id, runQuery.data?.id]);
+
   if (ticket.isPending) {
     return <LoadingState label="Loading ticket" rows={4} />;
   }
@@ -113,6 +134,13 @@ export function TicketDetailPage() {
   const draftAvailable = runHasDraft(current);
   const provider = current ? describeProvider(current.provider_kind) : null;
   const runList = runs.data?.items ?? [];
+  const recommended = nextRecommendedAction({
+    analysisSucceeded: analysisSucceeded(current),
+    evidenceAvailable: Boolean(report?.ledger?.length || current?.retrieval_result?.chunks?.length),
+    assuranceAvailable: Boolean(report),
+    humanDecisionRecorded: Boolean(current?.human_decision),
+    comparableRuns: runList.length,
+  });
 
   return (
     <div className="space-y-8">
@@ -146,18 +174,45 @@ export function TicketDetailPage() {
               ) : null}
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-end gap-2">
             {report ? (
               <Button variant="secondary" data-testid="view-decision-packet" onClick={() => setShowPacket(true)}>
                 View Decision Packet
               </Button>
             ) : null}
-            <Button data-testid="run-ai-analysis" onClick={() => analyze.mutate()} disabled={analyze.isPending}>
-              {analyze.isPending ? "Running workflow" : current ? "Run AI analysis again" : "Run AI analysis"}
-            </Button>
+            {current ? (
+              <Link className={buttonClasses("secondary")} to={`/ai-runs/${current.id}`}>
+                Open AI run
+              </Link>
+            ) : null}
+            <div className={cn(guideMode && recommended === "run" && "rounded-lg ring-2 ring-lime ring-offset-2 ring-offset-canvas")}>
+              {guideMode && recommended === "run" ? (
+                <p className="mb-1 text-xs font-medium text-lime" data-testid="recommended-run-label">
+                  Next recommended action
+                </p>
+              ) : null}
+              <Button
+                id="run-ai-analysis"
+                data-testid="run-ai-analysis"
+                onClick={() => analyze.mutate()}
+                disabled={analyze.isPending}
+              >
+                {analyze.isPending ? "Running workflow" : current ? "Run AI analysis again" : "Run AI analysis"}
+              </Button>
+            </div>
           </div>
         </div>
       </header>
+
+      {guideMode ? (
+        <RiskyGuide
+          ticketId={data.id}
+          run={current}
+          report={report}
+          comparableRuns={runList.length}
+          recommended={recommended}
+        />
+      ) : null}
 
       {justCreated ? (
         <p role="status" className="rounded-md bg-lime/10 p-3 text-sm text-lime">
@@ -202,6 +257,8 @@ export function TicketDetailPage() {
 
       <SectionNav sections={TICKET_SECTIONS} />
 
+      <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_17rem] xl:items-start xl:gap-8">
+      <div className="space-y-8">
       <TicketSection id="overview" title="Overview" description="Where this case stands, from the stored run.">
         {runs.isError || (runQuery.isError && !current) ? (
           <ErrorState
@@ -269,7 +326,16 @@ export function TicketDetailPage() {
         <AssuranceSection run={current} report={report} />
       </TicketSection>
 
-      <TicketSection id="decision" title="Decision" description="The human decision. Only a person can approve or act.">
+      <TicketSection
+        id="decision"
+        title="Decision"
+        description="The human decision. Only a person can approve or act."
+      >
+        {guideMode && recommended === "decision" ? (
+          <p className="text-xs font-medium text-lime" data-testid="recommended-decision-label">
+            Next recommended action
+          </p>
+        ) : null}
         <DecisionSection
           key={current?.id ?? "no-run"}
           run={current}
@@ -302,6 +368,62 @@ export function TicketDetailPage() {
           </Link>
         </p>
       ) : null}
+      </div>
+      <aside className="mt-8 space-y-3 xl:sticky xl:top-36 xl:mt-0" aria-label="Case inspector">
+        <Card className="border-t-2 border-t-violet">
+          <h2 className="text-sm font-semibold text-ink">Inspect this case</h2>
+          <p className="mt-1 text-xs text-muted">
+            {guideMode
+              ? "Direct access to technical surfaces. The guided review above explains what to do next."
+              : "Direct access to technical surfaces on this ticket and related project pages."}
+          </p>
+          <ul className="m-0 mt-3 list-none space-y-2 p-0 text-sm">
+            <li>
+              <a className="underline underline-offset-2 hover:text-lime" href="#evidence">
+                Evidence Ledger
+              </a>
+            </li>
+            <li>
+              <a className="underline underline-offset-2 hover:text-lime" href="#assurance">
+                Assurance gates
+              </a>
+            </li>
+            <li>
+              <a className="underline underline-offset-2 hover:text-lime" href="#decision">
+                Human decision
+              </a>
+            </li>
+            <li>
+              <a className="underline underline-offset-2 hover:text-lime" href="#replay">
+                Replay on this ticket
+              </a>
+            </li>
+            {current ? (
+              <li>
+                <Link className="underline underline-offset-2 hover:text-lime" to={`/ai-runs/${current.id}`}>
+                  Pipeline for this run
+                </Link>
+              </li>
+            ) : null}
+            <li>
+              <Link className="underline underline-offset-2 hover:text-lime" to={`/replay?ticket=${data.id}`}>
+                Decision Replay
+              </Link>
+            </li>
+            <li>
+              <Link className="underline underline-offset-2 hover:text-lime" to="/assurance">
+                Decision Assurance
+              </Link>
+            </li>
+            <li>
+              <Link className="underline underline-offset-2 hover:text-lime" to="/knowledge">
+                Knowledge base
+              </Link>
+            </li>
+          </ul>
+        </Card>
+      </aside>
+      </div>
 
       <DecisionPacketDialog open={showPacket} onClose={() => setShowPacket(false)} report={report} />
     </div>

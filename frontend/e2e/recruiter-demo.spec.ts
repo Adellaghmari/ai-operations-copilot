@@ -24,7 +24,7 @@ test("recruiter demo: dashboard to approved AI run", async ({ page, request }) =
   await expect(page.getByTestId("metric-open-tickets")).toBeVisible();
   await expect(page.getByTestId("product-tagline")).toContainText("whether you should trust it");
 
-  await page.getByRole("link", { name: "Ticket queue" }).click();
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Ticket queue", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Ticket queue" })).toBeVisible();
   const sample = page.locator('a[data-testid^="ticket-link-"]').first();
   await expect(sample).toBeVisible();
@@ -51,13 +51,13 @@ test("recruiter demo: dashboard to approved AI run", async ({ page, request }) =
   await page.getByTestId("open-ai-run").click();
   await expect(page.getByTestId("ai-run-detail")).toBeVisible();
 
-  await page.getByRole("link", { name: "Feedback" }).click();
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Feedback", exact: true }).click();
   await expect(page.getByTestId("feedback-heading")).toBeVisible();
 });
 
 test("navigation reaches the About the Project page", async ({ page }: { page: Page }) => {
   await page.goto("/");
-  await page.getByRole("link", { name: "About", exact: true }).click();
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "About", exact: true }).click();
   await expect(page.getByRole("heading", { name: "About the Project" })).toBeVisible();
   await expect(page.getByText("Decision Assurance Engine", { exact: false }).first()).toBeVisible();
 });
@@ -112,6 +112,8 @@ test("assurance gates and evidence ledger on a risky case", async ({ page, reque
   const cta = page.getByTestId("try-risky-case");
   await expect(cta).toBeVisible({ timeout: 10_000 });
   await cta.click();
+  await expect(page).toHaveURL(/guide=risky/);
+  await expect(page.getByTestId("risky-guide")).toBeVisible();
   await page.getByTestId("run-ai-analysis").click();
   await expect(page.getByTestId("assurance-gates")).toBeVisible({ timeout: liveDemo ? 240_000 : 60_000 });
   await expect(page.getByTestId("evidence-ledger")).toBeVisible();

@@ -2,24 +2,26 @@
 
 @theme {
   --font-sans: "Segoe UI", Aptos, ui-sans-serif, system-ui, sans-serif;
-  --color-canvas: #07090d;
-  --color-surface: #121820;
-  --color-surface-2: #1a2230;
-  --color-surface-3: #243044;
-  --color-line: #2c384c;
-  --color-line-strong: #3d4d66;
-  --color-ink: #f3f6ef;
-  --color-ink-soft: #d5dece;
-  --color-muted: #9aab9c;
-  --color-faint: #8d9a94;
-  --color-lime: #c6f04d;
-  --color-lime-deep: #a6cc32;
-  --color-lime-ink: #12160b;
-  --color-violet: #c4b5fd;
-  --color-violet-deep: #8b78e6;
+  --color-canvas: #04050a;
+  --color-surface: #101318;
+  --color-surface-2: #171b24;
+  --color-surface-3: #1f2430;
+  --color-line: #2a3142;
+  --color-line-strong: #3a4258;
+  --color-ink: #f4f1ea;
+  --color-ink-soft: #c9c4d6;
+  --color-muted: #8f8aa0;
+  --color-faint: #6e6a80;
+  --color-lime: #c8f04a;
+  --color-lime-deep: #a8d12e;
+  --color-lime-ink: #12180a;
+  --color-violet: #b794f6;
+  --color-violet-deep: #7c5cbf;
+  --color-violet-glow: rgba(124, 58, 237, 0.3);
 }
 
 :root {
+  --shell-offset: 8.5rem;
   color-scheme: dark;
   font-family: "Segoe UI", Aptos, ui-sans-serif, system-ui, sans-serif;
   background: var(--color-canvas);
@@ -30,12 +32,18 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(ellipse 42% 28% at 115% -8%, rgba(139, 120, 230, 0.16), transparent 70%),
-    radial-gradient(ellipse 36% 24% at -12% 108%, rgba(198, 240, 77, 0.07), transparent 68%),
+    radial-gradient(ellipse 70% 42% at 50% -18%, rgba(124, 58, 237, 0.22), transparent 58%),
+    radial-gradient(ellipse 28% 22% at 100% 8%, rgba(183, 148, 246, 0.1), transparent 70%),
+    radial-gradient(ellipse 32% 24% at -8% 100%, rgba(200, 240, 74, 0.06), transparent 68%),
     var(--color-canvas);
   overflow-wrap: break-word;
 }
@@ -53,7 +61,6 @@ code {
   color: var(--color-lime-ink);
 }
 
-/* In the base layer so Tailwind text color utilities on links, such as button styled links, win. */
 @layer base {
   a {
     color: inherit;
@@ -61,13 +68,11 @@ code {
   }
 }
 
-/* Visible keyboard focus for every interactive element that does not set its own ring. */
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--color-lime);
   outline-offset: 2px;
 }
 
-/* Subtle motion only. Reduced motion users get none. */
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -80,6 +85,17 @@ code {
 @keyframes slide-in {
   from {
     transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-start {
+  from {
+    transform: translateX(-24px);
     opacity: 0;
   }
   to {
@@ -103,6 +119,31 @@ code {
   animation: rise-in 220ms ease-out both;
 }
 
+.ambient-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.ambient-hero::before {
+  content: "";
+  position: absolute;
+  inset: -28% -12% auto -12%;
+  height: 140%;
+  background: radial-gradient(ellipse at 38% 0%, rgba(124, 58, 237, 0.28), transparent 62%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.display-title {
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+}
+
+.pipeline-rail {
+  background: linear-gradient(90deg, rgba(183, 148, 246, 0.55), rgba(200, 240, 74, 0.45));
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -115,10 +156,9 @@ code {
 }
 
 html {
-  scroll-padding-top: 7rem;
+  scroll-padding-top: 8.5rem;
 }
 
-/* Printing an open dialog prints the dialog only, for example the Decision Packet. */
 @media print {
   #root {
     display: none !important;

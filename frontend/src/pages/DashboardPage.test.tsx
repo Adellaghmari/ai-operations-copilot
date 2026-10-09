@@ -42,7 +42,7 @@ describe("DashboardPage", () => {
     expect(screen.getAllByText("Synthetic").length).toBe(4);
     // Scenarios without a seeded ticket are stated honestly, not linked.
     expect(screen.getAllByText("Not seeded in this database yet.").length).toBe(2);
-    expect(screen.getByTestId("try-risky-case")).toBeInTheDocument();
+    expect(screen.getByTestId("try-risky-case")).toHaveAttribute("href", expect.stringMatching(/\?guide=risky$/));
   });
 
   it("shows missing rates as Not available, not as zero", async () => {

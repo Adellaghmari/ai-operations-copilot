@@ -440,6 +440,9 @@ async def _seed_database(
         customers.append(customer)
     await session.flush()
 
+    # Synthetic fixture tickets use a relative demo clock anchored at seed/reset time.
+    # Intervals between tickets stay fixed, so a reset keeps the queue feeling current.
+    # This clock is not applied to live AI runs, human decisions, or Foundry events.
     now = datetime.now(UTC)
     existing_tickets = (await session.execute(select(Ticket))).scalars().first()
     if existing_tickets is None:
