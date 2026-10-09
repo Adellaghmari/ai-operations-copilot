@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-operations-copilot-backend"
+version = "0.1.0"
+description = "AI Operations Copilot FastAPI backend"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116.0",
+  "uvicorn[standard]>=0.35.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.10.0",
+  "sqlalchemy[asyncio]>=2.0.40",
+  "asyncpg>=0.30.0",
+  "psycopg[binary]>=3.2.0",
+  "alembic>=1.16.0",
+  "pgvector>=0.4.1",
+  "python-multipart>=0.0.20",
+  "httpx>=0.28.0",
+  "pypdf>=5.4.0",
+  "opentelemetry-api>=1.34.0",
+  "opentelemetry-sdk>=1.34.0",
+  "opentelemetry-exporter-otlp>=1.34.0",
+  "opentelemetry-instrumentation-fastapi>=0.55b0",
+  "structlog>=25.1.0",
+  "azure-identity>=1.23.0",
+  "agent-framework-core>=1.8.0",
+  "agent-framework-foundry>=1.8.0",
+  "agent-framework-orchestrations>=1.1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.26.0",
+  "ruff>=0.12.0",
+  "mypy>=1.16.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*", "scripts*", "evals*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+  "cloud: tests that call paid cloud models (skipped by default)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true
