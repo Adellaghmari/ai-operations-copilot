@@ -219,9 +219,9 @@ function RuntimeStatus({
 function DesktopProductNav() {
   return (
     <nav id="primary-navigation" aria-label="Primary" data-testid="desktop-navigation">
-      <ul className="m-0 flex w-full list-none items-stretch gap-1 overflow-hidden rounded-xl border border-white/10 bg-[#12151c] p-1">
+      <ul className="m-0 flex w-full list-none items-stretch gap-1 overflow-hidden rounded-xl border border-white/10 bg-[#0a0c12] p-1">
         {RIBBON_GROUPS.map((group) => (
-          <li key={group.id} className="min-w-max flex-1 rounded-lg bg-violet/15 px-2 py-2">
+          <li key={group.id} className="min-w-max flex-1 rounded-lg px-2 py-2">
             <p className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.14em] text-violet">
               {group.label}
             </p>
@@ -236,12 +236,12 @@ function DesktopProductNav() {
                     title={link.hint}
                     className={({ isActive }) =>
                       cn(
-                        "group/route inline-flex min-h-9 items-center gap-1 whitespace-nowrap rounded-md border px-2 py-1.5 text-[13px] font-semibold leading-none text-ink",
-                        "border-white/35 bg-white/10 shadow-[0_1px_0_0_rgba(255,255,255,0.06),0_1px_2px_0_rgba(0,0,0,0.35)]",
-                        "hover:border-violet/70 hover:bg-violet/30 hover:text-white",
+                        "group/route inline-flex min-h-9 items-center gap-1 whitespace-nowrap rounded-md border px-2 py-1.5 text-[13px] font-semibold leading-none text-white",
+                        "border-violet/55 bg-[linear-gradient(180deg,#5c4d86_0%,#2f2744_100%)] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.28),0_0_12px_rgba(183,148,246,0.2)]",
+                        "hover:border-lime/50 hover:bg-[linear-gradient(180deg,#6d5a9e_0%,#3b3160_100%)] hover:text-white hover:shadow-[0_0_18px_rgba(183,148,246,0.38)]",
                         "motion-safe:transition motion-safe:duration-150 motion-safe:hover:-translate-y-px",
                         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lime",
-                        isActive && "border-lime/60 bg-lime/15 text-lime shadow-[inset_0_-2px_0_0_var(--color-lime)]",
+                        isActive && "border-lime/80 bg-[linear-gradient(180deg,#3f4a1d_0%,#232810_100%)] text-lime shadow-[inset_0_-2px_0_0_var(--color-lime),0_0_16px_rgba(200,240,74,0.18)]",
                       )
                     }
                   >
@@ -250,16 +250,16 @@ function DesktopProductNav() {
                         <Icon
                           aria-hidden="true"
                           className={cn(
-                            "h-3.5 w-3.5 shrink-0 text-violet group-hover/route:text-lime",
-                            isActive && "text-lime",
+                            "h-3.5 w-3.5 shrink-0 group-hover/route:text-lime",
+                            isActive ? "text-lime" : "text-[#d8c4ff]",
                           )}
                         />
                         {link.label}
                         <ChevronRight
                           aria-hidden="true"
                           className={cn(
-                            "h-2.5 w-2.5 shrink-0 text-violet/50 group-hover/route:text-lime",
-                            isActive && "text-lime",
+                            "h-2.5 w-2.5 shrink-0 group-hover/route:text-lime",
+                            isActive ? "text-lime" : "text-white/70",
                           )}
                         />
                       </>
